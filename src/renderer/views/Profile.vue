@@ -238,9 +238,15 @@ const handleLogout = () => {
 
 const confirmLogout = () => {
   showLogoutConfirm.value = false;
-  userStore.logout();
-  // 清除设备信息，下次请求时自动重新注册
-  useDeviceStore().clearDeviceInfo();
+  // 统一走多账号退出：若有其他账号则自动切换，否则完全登出
+  const currentId = userStore.info?.userid;
+  if (currentId != null) {
+    userStore.logoutAccount(currentId);
+  }
+  // 仅当完全登出（无剩余账号）时才清设备信息
+  if (!userStore.isLoggedIn) {
+    useDeviceStore().clearDeviceInfo();
+  }
   router.push('/main/home');
 };
 

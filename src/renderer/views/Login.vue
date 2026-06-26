@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, reactive, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '@/stores/user';
-import { useSettingStore } from '@/stores/setting';
 import {
   getLoginQrKey,
   createLoginQr,
@@ -39,18 +38,6 @@ import {
 
 const router = useRouter();
 const userStore = useUserStore();
-const settingStore = useSettingStore();
-
-const triggerAutoReceiveVipAfterLogin = () => {
-  if (!settingStore.autoReceiveVip) return;
-
-  void userStore
-    .fetchUserInfoOnce()
-    .then(() => userStore.autoReceiveVipIfNeeded())
-    .catch((e) => {
-      console.warn('triggerAutoReceiveVipAfterLogin failed:', e);
-    });
-};
 
 // 当前选中的 Tab (0: 扫码, 1: 验证码, 2: 微信)
 const activeTab = ref('0');
@@ -121,8 +108,7 @@ const startCheckStatus = async () => {
         if (status === 4 && res.data) {
           isPollingQr = false;
           isLoginDone = true;
-          userStore.handleLoginSuccess(res.data);
-          triggerAutoReceiveVipAfterLogin();
+          userStore.loginAsNewAccount(res.data);
           await closeLoginPage();
           break;
         } else if (status === 0) {
@@ -195,8 +181,7 @@ const handleSmsLogin = async () => {
     const res: any = await loginBySms(mobile, smsData.code);
     if (res.status === 1 && res.data) {
       isLoginDone = true;
-      userStore.handleLoginSuccess(res.data);
-      triggerAutoReceiveVipAfterLogin();
+      userStore.loginAsNewAccount(res.data);
       await closeLoginPage();
     } else {
       smsData.error = res.error || '登录失败，请稍后重试';
@@ -264,8 +249,7 @@ const startCheckWxStatus = async () => {
             const loginRes: any = await loginByOpenPlat(wxCode);
             if (loginRes?.status === 1 || loginRes?.code === 200) {
               isLoginDone = true;
-              userStore.handleLoginSuccess(loginRes.data || loginRes.body?.data || loginRes);
-              triggerAutoReceiveVipAfterLogin();
+              userStore.loginAsNewAccount(loginRes.data || loginRes.body?.data || loginRes);
               await closeLoginPage();
             }
           }
@@ -323,7 +307,9 @@ onUnmounted(() => {
 
     <OverlayHeader />
 
-    <div class="w-full max-w-[400px] md:max-w-[800px] px-5 pt-3 z-50 flex items-center">
+    <div
+      class="w-full max-w-[400px] md:max-w-[800px] px-5 pt-3 z-50 flex items-center"
+    >
       <Button
         @click="closeLoginPage"
         variant="unstyled"

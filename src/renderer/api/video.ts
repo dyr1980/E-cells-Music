@@ -6,12 +6,17 @@ export function getVideoUrl(hash: string) {
   });
 }
 
-export function getSongMv(albumAudioId: string | number, fields = 'mkv,tags,h264,h265,authors') {
+export function getSongMv(
+  albumAudioId: string | number,
+  fields = 'mkv,tags,h264,h265,authors',
+  signal?: AbortSignal,
+) {
   return request.get('/kmr/audio/mv', {
     params: {
       album_audio_id: albumAudioId,
       fields,
     },
+    signal,
   });
 }
 

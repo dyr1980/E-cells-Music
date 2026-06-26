@@ -18,6 +18,8 @@ interface Props {
   disabled?: boolean;
   contentClass?: string;
   contentStyle?: string | Record<string, string>;
+  /** 触发器是否撑满父级宽度（block 布局）。默认 false（inline-flex 收缩到内容）。 */
+  block?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -30,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
   duration: 100,
   disabled: false,
   contentClass: '',
+  block: false,
 });
 
 const emit = defineEmits<{
@@ -47,6 +50,13 @@ const isOpen = computed(() => {
   if (props.trigger === 'manual') return props.open ?? false;
   return internalOpen.value;
 });
+
+// 触发器布局：默认 inline-flex 收缩到内容；block 模式撑满父级宽度并允许收缩
+const triggerStyle = computed(() =>
+  props.block
+    ? { display: 'flex', width: '100%', minWidth: 0 }
+    : { display: 'inline-flex' },
+);
 
 const clearTimers = () => {
   if (showTimer) {
@@ -154,7 +164,7 @@ onUnmounted(() => {
     <PopoverTrigger as-child>
       <span
         ref="triggerWrapRef"
-        style="display: inline-flex"
+        :style="triggerStyle"
         @mouseenter="handleTriggerEnter"
         @mouseleave="handleTriggerLeave"
         @click="handleTriggerClick"

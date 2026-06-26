@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { IconifyIcon } from '@iconify/types';
 import { iconPlay, iconList } from '@/icons';
 import Button from '@/components/ui/Button.vue';
+import MvIcon from '@/components/ui/MvIcon.vue';
 interface Action {
   icon: IconifyIcon;
   label: string;
@@ -16,6 +18,10 @@ interface Props {
   playDisabled?: boolean;
   hidePlay?: boolean;
   hideBatch?: boolean;
+  hideMv?: boolean;
+  mvCount?: number;
+  mvDisabled?: boolean;
+  iconOnly?: boolean;
   onPlay?: () => void;
   secondaryActions?: Action[];
 }
@@ -25,20 +31,96 @@ const props = withDefaults(defineProps<Props>(), {
   playDisabled: false,
   hidePlay: false,
   hideBatch: false,
+  hideMv: false,
+  mvCount: 0,
+  mvDisabled: false,
+  iconOnly: false,
   secondaryActions: () => [],
 });
 
 const emit = defineEmits<{
   (e: 'play'): void;
   (e: 'batch'): void;
+  (e: 'mv'): void;
 }>();
+
+const mvButtonLabel = computed(() => {
+  return props.mvCount && props.mvCount > 0 ? `MV(${props.mvCount})` : 'MV';
+});
 </script>
 
 <template>
-  <div class="action-row-wrap flex flex-wrap items-center justify-start gap-2.5">
+  <!-- 竖屏图标模式 -->
+  <div v-if="props.iconOnly" class="action-row-wrap flex flex-wrap items-center justify-start gap-1.5">
+    <Button
+      v-if="!props.hidePlay"
+      variant="unstyled"
+      size="none"
+      :disabled="props.playDisabled"
+      @click="emit('play')"
+      class="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-primary transition-colors"
+      :class="{ 'opacity-45 pointer-events-none': props.playDisabled }"
+    >
+      <Icon :icon="iconPlay" width="20" height="20" />
+    </Button>
+
+    <Button
+      v-if="!props.hideMv"
+      variant="unstyled"
+      size="none"
+      :disabled="props.mvDisabled"
+      @click="emit('mv')"
+      class="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-rose-400 transition-colors"
+      :class="{ 'opacity-45 pointer-events-none': props.mvDisabled }"
+    >
+      <MvIcon class="w-5 h-5" />
+    </Button>
+
+    <Button
+      v-for="action in secondaryActions"
+      :key="action.label"
+      variant="unstyled"
+      size="none"
+      @click="action.onTap"
+      :disabled="action.disabled"
+      class="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+      :class="[
+        action.tone === 'favorite' ? 'text-red-400' : 'text-text-main/60',
+        { 'opacity-45 pointer-events-none': action.disabled },
+      ]"
+    >
+      <Icon :icon="action.icon" width="18" height="18" />
+    </Button>
+
+    <Button
+      v-if="!props.hideBatch"
+      variant="unstyled"
+      size="none"
+      @click="emit('batch')"
+      class="p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-text-main/60 transition-colors"
+    >
+      <Icon :icon="iconList" width="18" height="18" />
+    </Button>
+  </div>
+
+  <!-- 横屏带文字模式（默认） -->
+  <div v-else class="action-row-wrap flex flex-wrap items-center justify-start gap-2.5">
     <Button v-if="!props.hidePlay" variant="unstyled" size="none" :disabled="props.playDisabled" @click="emit('play')" class="action-btn primary" :class="{ 'action-btn-disabled': props.playDisabled }">
       <Icon :icon="iconPlay" width="18" height="18" />
       <span>{{ playLabel }}</span>
+    </Button>
+
+    <Button
+      v-if="!props.hideMv"
+      variant="unstyled"
+      size="none"
+      :disabled="props.mvDisabled"
+      @click="emit('mv')"
+      class="action-btn secondary mv-btn"
+      :class="{ 'action-btn-disabled': props.mvDisabled }"
+    >
+      <MvIcon class="w-4 h-4" />
+      <span>{{ mvButtonLabel }}</span>
     </Button>
 
     <Button
@@ -94,6 +176,16 @@ const emit = defineEmits<{
 .action-btn.secondary.emphasized:hover {
   color: #dc2626;
   background: color-mix(in srgb, #ef4444 18%, transparent);
+}
+
+.action-btn.secondary.mv-btn {
+  color: #f87171;
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+}
+
+.action-btn.secondary.mv-btn:hover {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 14%, transparent);
 }
 
 .action-btn:hover {

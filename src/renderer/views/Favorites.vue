@@ -30,9 +30,11 @@ import MvCard from '@/components/music/MvCard.vue';
 import Cover from '@/components/ui/Cover.vue';
 import BackToTop from '@/components/ui/BackToTop.vue';
 import Button from '@/components/ui/Button.vue';
-import { iconCurrentLocation, iconHeart, iconSearch } from '@/icons';
+import MvIcon from '@/components/ui/MvIcon.vue';
+import { iconCurrentLocation, iconHeart, iconList, iconPlay, iconSearch } from '@/icons';
 import { isGeckoView } from '@/utils/nativeBridge';
 import { replaceQueueAndPlay } from '@/utils/playback';
+import { launchMvWithPlaylist, type MvPlaylistItem } from '@/utils/launchMv';
 
 const playlistStore = usePlaylistStore();
 const playerStore = usePlayerStore();
@@ -106,6 +108,32 @@ const handlePlayAll = async () => {
   if (allSongs.length > songs.value.length) {
     playlistStore.setPlaybackQueueWithOptions(allSongs.slice() as Song[], 0, queueOpts);
   }
+};
+
+const mvCount = computed(() => songs.value.filter(s => (s.mvHash ?? '').trim()).length);
+
+const handlePlayMv = async () => {
+  const mvSongs = songs.value.filter(s => (s.mvHash ?? '').trim());
+  if (mvSongs.length === 0) {
+    toastStore.info('当前列表暂无MV');
+    return;
+  }
+  const playlist: MvPlaylistItem[] = mvSongs.map(s => ({
+    hash: s.mvHash!,
+    albumAudioId: String(s.mixSongId || s.id || ''),
+    title: s.title,
+    artist: s.artist,
+    coverUrl: s.coverUrl,
+  }));
+  await launchMvWithPlaylist({
+    playlist,
+    startIndex: 0,
+    hash: playlist[0].hash,
+    albumAudioId: playlist[0].albumAudioId,
+    title: playlist[0].title,
+    artist: playlist[0].artist,
+    cover: playlist[0].coverUrl,
+  });
 };
 
 const handleSongDoubleTapPlay = async (song: Song) => {
@@ -378,7 +406,7 @@ watch(isLoggedIn, (value) => {
             <div class="text-[20px] font-semibold text-text-main tracking-tight">我最喜爱</div>
           </div>
           <div v-if="activeTab === 'songs'" class="overflow-x-auto">
-            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+            <ActionRow @play="handlePlayAll" @mv="handlePlayMv" @batch="openBatchDrawer" :mv-count="mvCount" />
           </div>
         </div>
       </div>
@@ -389,32 +417,35 @@ watch(isLoggedIn, (value) => {
           class="song-list-sticky sticky z-[110] bg-bg-main"
           :style="{ top: isPortrait ? '0' : '64px' }"
         >
-          <!-- 竖屏：头部图标 + 操作按钮 -->
+          <!-- 竖屏：头部图标 + 标题 + 操作按钮（图标态） -->
           <template v-if="isPortrait">
-            <div class="px-4 pt-3 pb-2 flex items-center gap-3">
-              <div
-                class="w-14 h-14 rounded-[18px] bg-primary/10 text-primary flex items-center justify-center shrink-0"
-              >
-                <Icon :icon="iconHeart" width="26" height="26" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div class="text-base font-bold text-text-main">我最喜爱</div>
-                <div class="text-xs text-text-secondary mt-0.5">
-                  <template v-if="activeTab === 'songs'">{{ songs.length }} 首歌曲</template>
-                  <template v-else-if="activeTab === 'singers'"
-                    >{{ singerCards.length }} 位歌手</template
-                  >
-                  <template v-else-if="activeTab === 'users'"
-                    >{{ userCards.length }} 位用户</template
-                  >
-                  <template v-else-if="activeTab === 'albums'"
-                    >{{ albumCards.length }} 张专辑</template
-                  >
-                  <template v-else-if="activeTab === 'videos'">{{ videos.length }} 个视频</template>
+            <div class="px-4 pt-4 pb-1">
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-14 h-14 rounded-[18px] bg-primary/10 text-primary flex items-center justify-center shrink-0"
+                >
+                  <Icon :icon="iconHeart" width="26" height="26" />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-base font-bold text-text-main">我最喜爱</div>
+                  <div class="text-xs text-text-secondary mt-0.5">
+                    <template v-if="activeTab === 'songs'">{{ songs.length }} 首歌曲</template>
+                    <template v-else-if="activeTab === 'singers'"
+                      >{{ singerCards.length }} 位歌手</template
+                    >
+                    <template v-else-if="activeTab === 'users'"
+                      >{{ userCards.length }} 位用户</template
+                    >
+                    <template v-else-if="activeTab === 'albums'"
+                      >{{ albumCards.length }} 张专辑</template
+                    >
+                    <template v-else-if="activeTab === 'videos'">{{ videos.length }} 个视频</template>
+                  </div>
                 </div>
               </div>
-              <div v-if="activeTab === 'songs'" class="shrink-0">
-                <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+              <!-- 操作按钮行（仅歌曲 Tab，图标按钮样式） -->
+              <div v-if="activeTab === 'songs'" class="mt-3">
+                <ActionRow @play="handlePlayAll" @mv="handlePlayMv" @batch="openBatchDrawer" :mv-count="mvCount" :icon-only="true" />
               </div>
             </div>
           </template>

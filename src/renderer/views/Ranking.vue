@@ -418,7 +418,7 @@ watch(
         <BatchActionDrawer v-model:open="showBatchDrawer" :songs="songs" source-id="rank" />
 
         <!-- 头部详情（跟随滚动） -->
-        <div class="px-4 pt-3">
+        <div class="bg-bg-main px-4 pt-3">
           <div class="flex items-center gap-3">
             <div class="w-14 h-14 rounded-[18px] gradient-rank-text flex items-center justify-center shrink-0 font-extrabold text-[11px] text-white shadow-sm leading-none">
               TOP
@@ -448,23 +448,23 @@ watch(
               <span class="truncate">{{ selectedRank?.name || '排行榜选择' }}</span>
               <Icon :icon="iconChevronDown" width="14" height="14" />
             </Button>
-            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" :icon-only="true" />
           </div>
-        </div>
 
-        <div class="song-list-sticky sticky z-[110] bg-bg-main" :style="{ top: '0px' }">
-          <div class="border-b border-border-light/10 px-4">
-            <div class="flex items-center justify-between h-10">
-              <div class="text-[13px] font-semibold text-text-main relative">
-                歌曲 <Badge :count="displaySongCount" class="scale-90 origin-left" />
+          <div class="song-list-sticky sticky z-[110] bg-bg-main" :style="{ top: '0px' }">
+            <div class="border-b border-border-light/10 px-4">
+              <div class="flex items-center justify-between h-10">
+                <div class="text-[13px] font-semibold text-text-main relative">
+                  歌曲 <Badge :count="displaySongCount" class="scale-90 origin-left" />
+                </div>
+                <Button variant="unstyled" size="none" @click="handleLocate" class="song-locate-btn p-1.5 rounded-full text-text-main/60 hover:text-primary hover:bg-primary/10 transition-colors" title="定位当前播放">
+                  <Icon :icon="iconCurrentLocation" width="16" height="16" />
+                </Button>
               </div>
-              <Button variant="unstyled" size="none" @click="handleLocate" class="song-locate-btn p-1.5 rounded-full text-text-main/60 hover:text-primary hover:bg-primary/10 transition-colors" title="定位当前播放">
-                <Icon :icon="iconCurrentLocation" width="16" height="16" />
-              </Button>
             </div>
-          </div>
 
-          <SongListHeader :sortField="sortField" :sortOrder="sortOrder" :showCover="true" paddingClass="px-4" @sort="handleSort" />
+            <SongListHeader :sortField="sortField" :sortOrder="sortOrder" :showCover="true" paddingClass="px-4" @sort="handleSort" />
+          </div>
         </div>
 
         <div class="pb-safe relative z-[1]">

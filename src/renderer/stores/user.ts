@@ -9,6 +9,7 @@ import {
   upgradeDayVip,
 } from '@/api/user';
 import type { User, UserExtendsInfo } from '@/models/user';
+import type { Account, MinimalUserInfo } from '@/models/account';
 import { mapUser } from '@/utils/mappers';
 import logger from '@/utils/logger';
 import { useToastStore } from '@/stores/toast';
@@ -84,6 +85,86 @@ const buildPatchedUserInfo = (current: UserInfo | null, patch: Partial<UserInfo>
   });
 };
 
+/**
+ * 由登录/刷新响应数据构建完整 UserInfo。
+ * @param base base=null 表示「登录全新账号」——绝不继承旧 info，缺失字段留空
+ *             （由后续 fetchUserInfo 补全）；base=UserInfo 表示「刷新当前账号」——
+ *             以当前 info 为底打补丁（fetchUserInfo 语义）。这是区分多账号串号的关键。
+ */
+const buildUserInfoFromLoginData = (
+  data: Record<string, unknown>,
+  base: UserInfo | null,
+): UserInfo => {
+  const mapped = mapUser(data);
+
+  const detailPayload = isRecord(data.detail)
+    ? data.detail
+    : isRecord(data.extendsInfo) &&
+        isRecord((data.extendsInfo as Record<string, unknown>).detail)
+      ? ((data.extendsInfo as Record<string, unknown>).detail as Record<string, unknown>)
+      : isRecord(data)
+        ? data
+        : undefined;
+
+  const vipPayload = isRecord(data.vip)
+    ? data.vip
+    : isRecord(data.extendsInfo) && isRecord((data.extendsInfo as Record<string, unknown>).vip)
+      ? ((data.extendsInfo as Record<string, unknown>).vip as Record<string, unknown>)
+      : undefined;
+
+  // base=null 时不继承旧账号的 extendsInfo，仅合并本次响应内的来源
+  const mergedExtends = mergeExtendsInfo(
+    base?.extendsInfo,
+    mapped.extendsInfo,
+    detailPayload ? { detail: detailPayload } : undefined,
+    vipPayload ? { vip: vipPayload } : undefined,
+  );
+
+  return buildPatchedUserInfo(base, {
+    ...mapped,
+    ...(mergedExtends
+      ? {
+          extends: mergedExtends,
+          extendsInfo: mergedExtends,
+          ...(mergedExtends.detail ? { detail: mergedExtends.detail } : {}),
+          ...(mergedExtends.vip ? { vip: mergedExtends.vip } : {}),
+        }
+      : {}),
+  });
+};
+
+// ── 多账号（用户切换）辅助函数 ──
+
+/** 从当前 UserInfo 抽取账号快照（仅保留切换所需最少字段） */
+const accountFromInfo = (info: UserInfo): Account => ({
+  userid: info.userid,
+  token: info.token,
+  nickname: info.nickname,
+  pic: info.pic,
+  p_grade: info.p_grade,
+  t1: info.t1,
+  expires: info.expires,
+  savedAt: Date.now(),
+});
+
+/** 由账号快照反向构造最小可用 UserInfo（供 setUserInfo 切换身份） */
+const minimalInfoFromAccount = (acc: Account): MinimalUserInfo => ({
+  userid: acc.userid,
+  userId: acc.userid,
+  token: acc.token,
+  nickname: acc.nickname,
+  pic: acc.pic,
+  p_grade: acc.p_grade,
+  t1: acc.t1,
+  expires: acc.expires,
+});
+
+/** 判断账号 token 是否已过期（expires 缺失视为永久有效） */
+const isAccountExpired = (acc: Account): boolean => {
+  if (!acc.expires) return false;
+  return acc.expires <= Date.now();
+};
+
 export const useUserStore = defineStore('user', {
   state: () => ({
     info: null as UserInfo | null,
@@ -95,6 +176,11 @@ export const useUserStore = defineStore('user', {
     isAutoClaimingVip: false,
     followedArtistIds: new Set<string>(),
     hasFetchedFollowedArtists: false,
+    // ── 多账号（用户切换）状态 ──
+    // 已登录账号列表（含 token 等凭证，需持久化）
+    accounts: [] as Account[],
+    // 当前活跃账号的 userid，与 info.userid 同步
+    activeUserId: null as number | null,
   }),
   actions: {
     setUserInfo(info: UserInfo) {
@@ -108,44 +194,46 @@ export const useUserStore = defineStore('user', {
       });
     },
     handleLoginSuccess(data: Record<string, unknown>) {
+      // 语义：刷新当前账号（fetchUserInfo / VIP 领取后刷新）。以当前 info 为 base 打补丁。
       this.hasFetchedUserInfo = false;
-
-      const mapped = mapUser(data);
-      const detailPayload = isRecord(data.detail)
-        ? data.detail
-        : isRecord(data.extendsInfo) &&
-            isRecord((data.extendsInfo as Record<string, unknown>).detail)
-          ? ((data.extendsInfo as Record<string, unknown>).detail as Record<string, unknown>)
-          : isRecord(data)
-            ? data
-            : undefined;
-
-      const vipPayload = isRecord(data.vip)
-        ? data.vip
-        : isRecord(data.extendsInfo) && isRecord((data.extendsInfo as Record<string, unknown>).vip)
-          ? ((data.extendsInfo as Record<string, unknown>).vip as Record<string, unknown>)
-          : undefined;
-
-      const mergedExtends = mergeExtendsInfo(
-        this.info?.extendsInfo,
-        mapped.extendsInfo,
-        detailPayload ? { detail: detailPayload } : undefined,
-        vipPayload ? { vip: vipPayload } : undefined,
-      );
-
-      const nextInfo = buildPatchedUserInfo(this.info, {
-        ...mapped,
-        ...(mergedExtends
-          ? {
-              extends: mergedExtends,
-              extendsInfo: mergedExtends,
-              ...(mergedExtends.detail ? { detail: mergedExtends.detail } : {}),
-              ...(mergedExtends.vip ? { vip: mergedExtends.vip } : {}),
-            }
-          : {}),
-      });
-
-      this.setUserInfo(nextInfo);
+      this.setUserInfo(buildUserInfoFromLoginData(data, this.info));
+      this.saveCurrentAccount();
+      // 集中收敛：任何登录/添加账号成功后，统一触发今日会员自动领取（受 autoReceiveVip 控制）
+      void this.triggerAutoReceiveVipIfNeeded();
+    },
+    /**
+     * 登录全新账号（Login.vue 三种登录方式统一入口）。
+     * 与 handleLoginSuccess 的关键区别：base=null 干净构建，绝不继承旧账号的
+     * userid/token/t1/expires/pic/p_grade/nickname，从根上杜绝多账号串号/覆盖。
+     * 解析失败兜底：若登录响应解析不出 userid/token，info.token 为空 →
+     * setUserInfo 置 isLoggedIn=false、saveCurrentAccount 直接 return，不串号不覆盖。
+     */
+    loginAsNewAccount(data: Record<string, unknown>) {
+      // 当前已登录 → 先落盘当前账号（同 userid 幂等，异 userid 保全最新数据）
+      if (this.isLoggedIn && this.info?.userid && this.info?.token) {
+        this.saveCurrentAccount();
+      }
+      // base=null 干净构建（关键：杜绝继承旧 info）；显式置 false 确保随后补全真正执行
+      this.hasFetchedUserInfo = false;
+      this.setUserInfo(buildUserInfoFromLoginData(data, null));
+      // 写入账号列表
+      this.saveCurrentAccount();
+      // 参照 switchToAccount：无条件补全新账号完整信息 + 按设置自动领取今日会员
+      void (async () => {
+        try {
+          await this.fetchUserInfoOnce();
+        } catch (e) {
+          logger.warn('UserStore', 'loginAsNewAccount: fetchUserInfo failed', e);
+        }
+        try {
+          const { useSettingStore } = await import('@/stores/setting');
+          if (useSettingStore().autoReceiveVip) {
+            await this.autoReceiveVipIfNeeded();
+          }
+        } catch (e) {
+          logger.warn('UserStore', 'loginAsNewAccount: autoReceiveVip failed', e);
+        }
+      })();
     },
     async fetchUserInfo() {
       if (!this.isLoggedIn) return;
@@ -193,6 +281,21 @@ export const useUserStore = defineStore('user', {
         this.hasFetchedUserInfo = true;
       } finally {
         this.isFetchingUserInfo = false;
+      }
+    },
+
+    /**
+     * 登录/添加账号成功后的统一入口：受 autoReceiveVip 设置控制，
+     * 先补全用户信息再判断今日是否领取。供 handleLoginSuccess 等场景收敛调用。
+     */
+    async triggerAutoReceiveVipIfNeeded() {
+      const { useSettingStore } = await import('@/stores/setting');
+      if (!useSettingStore().autoReceiveVip) return;
+      try {
+        await this.fetchUserInfoOnce();
+        await this.autoReceiveVipIfNeeded();
+      } catch (e) {
+        logger.warn('UserStore', 'triggerAutoReceiveVip failed', e);
       }
     },
 
@@ -368,6 +471,107 @@ export const useUserStore = defineStore('user', {
       this.isAutoClaimingVip = false;
       this.followedArtistIds = new Set();
       this.hasFetchedFollowedArtists = false;
+      // 完全登出：清空账号列表与活跃账号标记
+      this.accounts = [];
+      this.activeUserId = null;
+    },
+
+    // ── 多账号（用户切换）actions ──
+
+    /**
+     * 将当前 info 写入 accounts 列表。
+     * 同 userid 覆盖更新（保留原 savedAt），否则新增。
+     */
+    saveCurrentAccount() {
+      if (!this.info?.userid || !this.info?.token) return;
+      const acc = accountFromInfo(this.info);
+      const idx = this.accounts.findIndex((a) => a.userid === acc.userid);
+      if (idx >= 0) {
+        // 保留原 savedAt，更新其余字段
+        this.accounts.splice(idx, 1, { ...acc, savedAt: this.accounts[idx].savedAt });
+      } else {
+        this.accounts.push(acc);
+      }
+      this.activeUserId = acc.userid;
+    },
+
+    /**
+     * 切换到指定账号。切换只替换 info，不影响 player/playlist/setting/device。
+     * @param options.preserveCurrent 切换前是否把当前账号最新 info 落盘（默认 true）。
+     *   退出当前账号时传 false，否则被移除的账号会被 saveCurrentAccount 重新写回 accounts。
+     * @returns true=切换成功；false=目标账号 token 已过期（由调用方提示并跳登录）
+     */
+    async switchToAccount(
+      userid: number,
+      options?: { preserveCurrent?: boolean },
+    ): Promise<boolean> {
+      const target = this.accounts.find((a) => a.userid === userid);
+      if (!target) {
+        logger.warn('UserStore', 'switchToAccount: account not found', userid);
+        return false;
+      }
+      // 切换前检测 token 是否过期
+      if (isAccountExpired(target)) {
+        logger.warn('UserStore', 'switchToAccount: account token expired', userid);
+        return false;
+      }
+      // 切换前先把当前 info 落盘，避免丢失最新状态（preserveCurrent=false 时跳过，
+      // 用于退出当前账号场景，避免被移除的账号被 saveCurrentAccount 重新写回 accounts）。
+      const preserveCurrent = options?.preserveCurrent !== false;
+      if (preserveCurrent && this.info?.userid && this.info.userid !== userid) {
+        this.saveCurrentAccount();
+      }
+      // 清空当前用户私有缓存（关注列表、VIP 领取状态、信息拉取标记）
+      this.followedArtistIds = new Set();
+      this.hasFetchedFollowedArtists = false;
+      this.hasFetchedUserInfo = false;
+      this.isTvipClaimedToday = false;
+      this.isSvipClaimedToday = false;
+      // 用目标账号快照装载 info —— 请求层会自动使用新 token/userid
+      this.setUserInfo(minimalInfoFromAccount(target));
+      this.activeUserId = userid;
+      // 异步补全 detail/vip 等完整信息；若开启自动领取则顺带领取今日会员
+      void (async () => {
+        try {
+          await this.fetchUserInfoOnce();
+        } catch (e) {
+          logger.warn('UserStore', 'switchToAccount: fetchUserInfo failed', e);
+        }
+        try {
+          const { useSettingStore } = await import('@/stores/setting');
+          if (useSettingStore().autoReceiveVip) {
+            await this.autoReceiveVipIfNeeded();
+          }
+        } catch (e) {
+          logger.warn('UserStore', 'switchToAccount: autoReceiveVip failed', e);
+        }
+      })();
+      return true;
+    },
+
+    /**
+     * 退出指定账号（统一入口）。
+     * - 从 accounts 列表移除
+     * - 若退出的是当前活跃账号：
+     *   - 还有其他账号 → 自动切到 savedAt 最早的一个（保持已登录态）
+     *   - 没有其他账号 → 完全登出（清空 info）
+     */
+    logoutAccount(userid: number) {
+      const idx = this.accounts.findIndex((a) => a.userid === userid);
+      if (idx < 0) return;
+      this.accounts.splice(idx, 1);
+
+      if (this.activeUserId !== userid) return;
+
+      if (this.accounts.length > 0) {
+        // 切到剩余账号中最早加入的一个；preserveCurrent=false 避免把刚退出的账号存回
+        const next = [...this.accounts].sort((a, b) => a.savedAt - b.savedAt)[0];
+        void this.switchToAccount(next.userid, { preserveCurrent: false });
+      } else {
+        // 无剩余账号，完全登出
+        this.activeUserId = null;
+        this.logout();
+      }
     },
 
     isArtistFollowed(artistId: string | number): boolean {

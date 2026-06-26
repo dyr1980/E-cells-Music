@@ -3,9 +3,12 @@ import { onMounted, onUnmounted, watch } from 'vue';
 import { RouterView } from 'vue-router';
 import AuthExpiredDialog from '@/components/app/AuthExpiredDialog.vue';
 import ToastViewport from '@/components/app/ToastViewport.vue';
+import UserSwitchDialog from '@/components/user/UserSwitchDialog.vue';
 import { usePlayerStore } from './stores/player';
 import { useSettingStore } from './stores/setting';
 import { useThemeStore } from './stores/theme';
+import { useUserStore } from './stores/user';
+import { usePlaylistStore } from './stores/playlist';
 import { getCoverUrl } from '@/utils/cover';
 import { addListener, isGeckoView } from '@/utils/nativeBridge';
 import { initDesktopLyricSync } from '@/desktopLyric/sync';
@@ -15,6 +18,8 @@ import LyricView from '@/views/Lyric.vue';
 const player = usePlayerStore();
 const settings = useSettingStore();
 const themeStore = useThemeStore();
+const userStore = useUserStore();
+const playlistStore = usePlaylistStore();
 let colorSchemeMediaQuery: MediaQueryList | null = null;
 let systemThemeListener: { remove: () => void } | null = null;
 const updateTheme = () => {
@@ -95,6 +100,17 @@ onUnmounted(() => {
 watch(() => settings.theme, updateTheme);
 watch(() => settings.globalFont, applyGlobalFont);
 
+// 账号身份变更（登录/添加/切换/退出）：立即清空并重新拉取 playlist 用户私有数据，
+// 防止上一个账号的「我最喜爱」「收藏歌单」残留（playlist store 持久化且不按用户隔离）。
+watch(
+  () => userStore.activeUserId,
+  (newId, oldId) => {
+    if (newId === oldId) return;
+    playlistStore.resetUserScopedData();
+    if (newId) void playlistStore.fetchUserPlaylists();
+  },
+);
+
 // 切歌时，cover 模式下自动提取封面主色
 watch(
   () => player.currentTrackSnapshot?.coverUrl,
@@ -140,6 +156,7 @@ document.addEventListener('visibilitychange', handleVisibilityChange);
     </Transition>
   </Teleport>
   <AuthExpiredDialog />
+  <UserSwitchDialog />
   <ToastViewport />
 </template>
 

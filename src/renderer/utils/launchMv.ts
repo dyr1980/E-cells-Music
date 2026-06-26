@@ -180,6 +180,8 @@ export interface MvPlaylistItem {
   title: string;
   artist: string;
   coverUrl: string;
+  // 可选：部分列表（如歌曲关联 MV）携带，用于启动时解析片源；不填则忽略
+  albumAudioId?: string;
 }
 
 /**

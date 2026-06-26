@@ -401,6 +401,7 @@ export const mapRankSong = (json: unknown): Song => {
     relateGoods,
     oldCpy,
     payType,
+    mvHash: readString(pickValue(record.video_hash, record.mvhash, ''), ''),
   };
 };
 

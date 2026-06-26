@@ -260,6 +260,10 @@ export const createPlaybackManager = (
     state.lastError = null;
     state.cacheProgress = 0;
     state.cacheProgressKey = '';
+    // 清理上一次 seek/拖动残留，避免旧 seek guard 在 timeUpdate 处理器中拦截新曲位置上报
+    state.isDraggingProgress = false;
+    state.seekTargetTime = null;
+    state.seekTimestamp = 0;
     clearPlaybackNotice();
     state.climaxMarks = [];
 
@@ -487,7 +491,7 @@ export const createPlaybackManager = (
       state.isPlaying = false;
       settingStore.syncPreventSleep(false);
       engine.updateMediaPlaybackState(buildMediaState(state));
-      engine.pause().catch((err) => logger.error('PlayerPlayback', 'Pause failed', err));
+      engine.pause({ reason: 'ui' }).catch((err) => logger.error('PlayerPlayback', 'Pause failed', err));
       return;
     }
 

@@ -165,7 +165,7 @@ onMounted(() => {
       </template>
 
       <template #actions>
-        <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+        <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" :hide-mv="true" />
       </template>
 
       <template #collapsed-actions>
@@ -263,33 +263,33 @@ onMounted(() => {
     <template v-else>
       <BatchActionDrawer v-model:open="showBatchDrawer" :songs="songs" source-id="recommend" />
 
-      <!-- 头部详情（跟随滚动） -->
-      <div class="px-4 pt-3">
-        <div class="flex items-center gap-3">
-          <div class="w-14 h-14 rounded-[18px] gradient-primary-text flex items-center justify-center shrink-0 font-extrabold text-[18px] text-white shadow-sm">
-            {{ todayLabel }}
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-[16px] font-extrabold text-text-main">每日推荐</div>
-            <div class="flex items-center gap-3 mt-0.5 text-[11px] text-text-secondary/80">
-              <span class="inline-flex items-center gap-1">
-                <Icon :icon="iconPlay" width="11" height="11" />
-                {{ displaySongCount }} 首
-              </span>
+      <!-- 竖屏固定头部 -->
+      <div class="sticky top-0 z-[110] bg-bg-main">
+        <div class="px-4 pt-3">
+          <div class="flex items-center gap-3">
+            <div class="w-14 h-14 rounded-[18px] gradient-primary-text flex items-center justify-center shrink-0 font-extrabold text-[18px] text-white shadow-sm">
+              {{ todayLabel }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-[16px] font-extrabold text-text-main">每日推荐</div>
+              <div class="flex items-center gap-3 mt-0.5 text-[11px] text-text-secondary/80">
+                <span class="inline-flex items-center gap-1">
+                  <Icon :icon="iconPlay" width="11" height="11" />
+                  {{ displaySongCount }} 首
+                </span>
+              </div>
             </div>
           </div>
+
+          <div class="flex items-center gap-1.5 mt-2.5">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-[0.8px] uppercase text-primary bg-primary/10 border border-primary/15">RECOMMEND</span>
+          </div>
+
+          <div class="mt-2.5">
+            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" :hide-mv="true" :icon-only="true" />
+          </div>
         </div>
 
-        <div class="flex items-center gap-1.5 mt-2.5">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-[0.8px] uppercase text-primary bg-primary/10 border border-primary/15">RECOMMEND</span>
-        </div>
-
-        <div class="mt-2.5">
-          <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
-        </div>
-      </div>
-
-      <div class="song-list-sticky sticky z-[110] bg-bg-main" :style="{ top: '0px' }">
         <div class="border-b border-border-light/10 px-4">
           <div class="flex items-center justify-between h-10">
             <div class="text-[13px] font-semibold text-text-main relative">

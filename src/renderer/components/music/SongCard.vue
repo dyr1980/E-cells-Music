@@ -392,6 +392,14 @@ const handleFavorite = () => {
             >
               {{ title }}
             </h3>
+            <span
+              v-if="hasMv && props.variant === 'list'"
+              class="song-mv-badge shrink-0"
+              title="播放 MV"
+              @click.stop="goToMvDetail"
+            >
+              <MvIcon class="w-3.5 h-3.5" />
+            </span>
             <Tag v-for="tag in privilegeTags" :key="tag.label" class="song-tag" :color="tag.color">
               {{ tag.label }}
             </Tag>
@@ -584,6 +592,23 @@ const handleFavorite = () => {
 .song-tag {
   margin-left: 4px;
   flex-shrink: 0;
+}
+
+.song-mv-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f87171;
+  cursor: pointer;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+  margin-left: 2px;
+}
+
+.song-mv-badge:hover {
+  transform: scale(1.15);
+  color: #ef4444;
 }
 
 .song-artist {

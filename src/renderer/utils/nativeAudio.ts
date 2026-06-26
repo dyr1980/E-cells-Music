@@ -3,7 +3,7 @@ import { isGeckoView, NativeAudioBridge } from './nativeBridge';
 export interface NativeAudioPlugin {
   loadAudio(options: { url: string; hash?: string; quality?: string }): Promise<{ loaded: boolean }>;
   play(): Promise<void>;
-  pause(): Promise<void>;
+  pause(reason?: 'ui'): Promise<void>;
   stop(): Promise<void>;
   seek(options: { time: number }): Promise<void>;
   setVolume(options: { volume: number }): Promise<void>;
@@ -43,6 +43,7 @@ export interface NativeAudioPlugin {
   ): Promise<any>;
   addListener(eventName: 'mediaButtonPlay', listenerFunc: () => void): Promise<any>;
   addListener(eventName: 'mediaButtonPause', listenerFunc: () => void): Promise<any>;
+  addListener(eventName: 'mediaButtonResume', listenerFunc: () => void): Promise<any>;
   addListener(eventName: 'mediaButtonNext', listenerFunc: () => void): Promise<any>;
   addListener(eventName: 'mediaButtonPrev', listenerFunc: () => void): Promise<any>;
   addListener(eventName: 'mediaButtonSeek', listenerFunc: (data: any) => void): Promise<any>;
@@ -70,7 +71,7 @@ const NativeAudio: NativeAudioPlugin = isGeckoView
   ? {
       loadAudio: (opts) => NativeAudioBridge.loadAudio(opts),
       play: () => NativeAudioBridge.play(),
-      pause: () => NativeAudioBridge.pause(),
+      pause: (reason) => NativeAudioBridge.pause(reason),
       stop: () => NativeAudioBridge.stop(),
       seek: (opts) => NativeAudioBridge.seek(opts),
       setVolume: (opts) => NativeAudioBridge.setVolume(opts),

@@ -871,6 +871,7 @@ onUnmounted(() => {
                 :playDisabled="activeTab === 'mvs' && isMvPlaylistLaunching"
                 @play="handlePlayAction"
                 @batch="openBatchDrawer"
+                :icon-only="true"
               />
             </div>
             <div class="border-b border-border-light/10 px-4">

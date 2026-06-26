@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user';
 import { usePlaylistStore } from '@/stores/playlist';
 import Avatar from '@/components/ui/Avatar.vue';
 import Cover from '@/components/ui/Cover.vue';
+import UserEntryMenu from '@/components/user/UserEntryMenu.vue';
 import { iconHeart, iconPulse, iconCloud, iconClock, iconSettings } from '@/icons';
 import type { PlaylistMeta } from '@/models/playlist';
 
@@ -57,20 +58,44 @@ onMounted(() => {
     <div class="px-5 md:px-6">
       
       <div class="my-header pt-2 pb-6">
-        <div class="user-card group" @click="isLoggedIn ? navigateTo('/main/profile') : goToLogin()">
+        <!-- 已登录：点击弹出「个人资料 / 用户切换」下拉菜单 -->
+        <UserEntryMenu v-if="isLoggedIn" side="bottom">
+          <div class="user-card group">
+            <div class="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent opacity-60 dark:opacity-20 pointer-events-none"></div>
+
+            <div class="user-avatar-wrap relative z-10">
+              <Avatar :src="userInfo?.pic" class="w-full h-full object-cover" />
+            </div>
+
+            <div class="user-meta relative z-10">
+              <span class="user-name">{{ userInfo?.nickname }}</span>
+              <span class="user-level">
+                Lv. {{ userInfo?.p_grade || 0 }} 尊享会员
+              </span>
+            </div>
+
+            <button
+              type="button"
+              class="settings-btn-inline relative z-10"
+              @click.stop="navigateTo('/main/settings')"
+            >
+              <Icon :icon="iconSettings" width="20" height="20" />
+            </button>
+          </div>
+        </UserEntryMenu>
+        <!-- 未登录：直接跳登录页 -->
+        <div v-else class="user-card group" @click="goToLogin()">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent opacity-60 dark:opacity-20 pointer-events-none"></div>
-          
+
           <div class="user-avatar-wrap relative z-10">
-            <Avatar :src="isLoggedIn ? userInfo?.pic : ''" class="w-full h-full object-cover" />
+            <Avatar :src="''" class="w-full h-full object-cover" />
           </div>
-          
+
           <div class="user-meta relative z-10">
-            <span class="user-name">{{ isLoggedIn ? userInfo?.nickname : '立即登录' }}</span>
-            <span class="user-level">
-              {{ isLoggedIn ? `Lv. ${userInfo?.p_grade || 0} 尊享会员` : '登录以同步你的音乐资产' }}
-            </span>
+            <span class="user-name">立即登录</span>
+            <span class="user-level">登录以同步你的音乐资产</span>
           </div>
-          
+
           <button
             type="button"
             class="settings-btn-inline relative z-10"
@@ -188,6 +213,7 @@ onMounted(() => {
 
 /* ── VIP 用户信息名片 ── */
 .user-card {
+  width: 100%; /* 登录态下卡片被 UserEntryMenu 的 flex 触发器包裹，需显式撑满以与下方卡片对齐 */
   position: relative;
   display: flex;
   align-items: center;

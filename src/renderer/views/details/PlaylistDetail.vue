@@ -41,11 +41,13 @@ import {
   iconInfo,
 } from '@/icons';
 import { replaceQueueAndPlay } from '@/utils/playback';
+import { launchMvWithPlaylist, type MvPlaylistItem } from '@/utils/launchMv';
 import { useToastStore } from '@/stores/toast';
 import { toRecord } from '../../../shared/object';
 import { PagedSongLoader } from '@/utils/PagedSongLoader';
 import { isGeckoView } from '@/utils/nativeBridge';
 import Cover from '@/components/ui/Cover.vue';
+import MvIcon from '@/components/ui/MvIcon.vue';
 
 const parseIntSafe = (value: unknown): number => {
   if (value == null) return 0;
@@ -476,6 +478,32 @@ const openBatchDrawer = () => {
   if (songs.value.length === 0) return;
   showBatchDrawer.value = true;
 };
+
+const mvCount = computed(() => songs.value.filter(s => (s.mvHash ?? '').trim()).length);
+
+const handlePlayMv = async () => {
+  const mvSongs = songs.value.filter(s => (s.mvHash ?? '').trim());
+  if (mvSongs.length === 0) {
+    toastStore.info('当前列表暂无MV');
+    return;
+  }
+  const playlist: MvPlaylistItem[] = mvSongs.map(s => ({
+    hash: s.mvHash!,
+    albumAudioId: String(s.mixSongId || s.id || ''),
+    title: s.title,
+    artist: s.artist,
+    coverUrl: s.coverUrl,
+  }));
+  await launchMvWithPlaylist({
+    playlist,
+    startIndex: 0,
+    hash: playlist[0].hash,
+    albumAudioId: playlist[0].albumAudioId,
+    title: playlist[0].title,
+    artist: playlist[0].artist,
+    cover: playlist[0].coverUrl,
+  });
+};
 const handleLocate = () => songListRef.value?.scrollToActive?.();
 
 const activeSongId = computed(() => playerStore.currentTrackId ?? undefined);
@@ -580,7 +608,9 @@ const sortedSongs = computed(() => {
               <ActionRow
                 :secondaryActions="secondaryActions"
                 @play="handlePlayAll"
+                @mv="handlePlayMv"
                 @batch="openBatchDrawer"
+                :mv-count="mvCount"
               />
             </template>
 
@@ -601,6 +631,14 @@ const sortedSongs = computed(() => {
                 class="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-primary transition-colors"
               >
                 <Icon :icon="iconPlay" width="22" height="22" />
+              </Button>
+              <Button
+                variant="unstyled"
+                size="none"
+                @click="handlePlayMv"
+                class="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10 text-rose-400 transition-colors"
+              >
+                <MvIcon class="w-5 h-5" />
               </Button>
               <Button
                 variant="unstyled"
@@ -780,7 +818,10 @@ const sortedSongs = computed(() => {
               <ActionRow
                 :secondaryActions="secondaryActions"
                 @play="handlePlayAll"
+                @mv="handlePlayMv"
                 @batch="openBatchDrawer"
+                :mv-count="mvCount"
+                :icon-only="true"
               />
             </div>
             <div class="border-b border-border-light/10 px-4">

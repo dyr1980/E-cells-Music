@@ -1155,14 +1155,14 @@ const handleShowChangelog = async () => {
           <div class="space-y-1 flex-1 min-w-0 pr-2 sm:pr-4">
             <h3 class="font-semibold text-[15px] sm:text-base truncate">歌词时间偏移</h3>
             <p class="text-[13px] sm:text-sm text-text-secondary leading-relaxed">
-              调整歌词提前或延后显示（正值延后，负值提前）
+              调整歌词延后显示的时间（0 为同步，值越大延后越多）
             </p>
           </div>
           <Slider
             class="w-28 sm:w-48 flex-shrink-0"
             :model-value="androidLyricOffsetMs"
-            :min="-1000"
-            :max="1000"
+            :min="0"
+            :max="2000"
             :step="50"
             show-value
             :value-suffix="'ms'"

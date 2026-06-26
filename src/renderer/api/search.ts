@@ -3,9 +3,16 @@ import request from '@/utils/request';
 /**
  * 搜索
  */
-export function search(keywords: string, type = 'song', page = 1, pagesize = 30) {
+export function search(
+  keywords: string,
+  type = 'song',
+  page = 1,
+  pagesize = 30,
+  signal?: AbortSignal,
+) {
   return request.get('/search', {
     params: { keywords, type, page, pagesize },
+    signal,
   });
 }
 

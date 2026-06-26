@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toast';
 import { useUserStore } from '@/stores/user';
 import { ensureDevice } from '@/utils/device';
 import logger from '@/utils/logger';
+import { isGeckoView } from '@/utils/nativeBridge';
 import Button from '@/components/ui/Button.vue';
 import OverlayHeader from '@/layouts/OverlayHeader.vue';
 import type { ApiServerStatus } from '@/../shared/api-server';
@@ -224,11 +225,14 @@ const closeWindow = () => {
 };
 
 onMounted(async () => {
-  // 前端页面 DOM 已渲染，通知原生 App 关闭启动屏遮罩
-  try {
-    window.prompt('__native__', 'native://hideSplash');
-  } catch (e) {
-    // 非 Android 环境忽略
+  // 前端页面 DOM 已渲染，通知原生 App 关闭启动屏遮罩（仅 Android GeckoView 环境）
+  // dev/Web 环境下无原生 prompt 拦截，window.prompt 会弹出浏览器原生对话框，故需守卫
+  if (isGeckoView) {
+    try {
+      window.prompt('__native__', 'native://hideSplash');
+    } catch {
+      // 桥不可用时忽略
+    }
   }
   await initStatus();
 });

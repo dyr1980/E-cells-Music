@@ -74,6 +74,8 @@ export class PlayerEngine {
   // Howler fallback
   private howl: Howl | null = null;
   private howlTimer: ReturnType<typeof setInterval> | null = null;
+  // onplay 偶发不触发时的兜底：延迟检测 howlTimer 是否启动，未启动则补启
+  private playFallbackTimer: number | null = null;
   private loopFile = false;
 
   // Web Audio effect engine (Howler backend only)
@@ -180,6 +182,10 @@ export class PlayerEngine {
 
   private unloadHowl(): void {
     this.stopHowlTimer();
+    if (this.playFallbackTimer) {
+      window.clearTimeout(this.playFallbackTimer);
+      this.playFallbackTimer = null;
+    }
     if (this.webAudioEngine) {
       this.webAudioEngine.disconnect();
     }
@@ -357,10 +363,21 @@ export class PlayerEngine {
     } else if (this.howl) {
       if (this.webAudioEngine) await this.webAudioEngine.resume();
       this.howl.play();
+      // 兜底：html5 模式下 play() 早于 onload 完成时 onplay 偶发不触发，
+      // 导致 howlTimer（timeUpdate 来源）与 events.play（含 stall 自愈）缺失，
+      // 进度条会卡死。延迟检测，若仍未启动且确实在播放，则补启。
+      if (this.playFallbackTimer) window.clearTimeout(this.playFallbackTimer);
+      this.playFallbackTimer = window.setTimeout(() => {
+        this.playFallbackTimer = null;
+        if (!this.howlTimer && this.howl?.playing()) {
+          this.startHowlTimer();
+          this.events.play?.();
+        }
+      }, 300);
     }
   }
 
-  async pause(options?: { fadeOut?: boolean; fadeDurationMs?: number }): Promise<void> {
+  async pause(options?: { fadeOut?: boolean; fadeDurationMs?: number; reason?: 'ui' }): Promise<void> {
     if (hasMpv) {
       const durationMs = options?.fadeOut ? (options.fadeDurationMs ?? 500) : 0;
       if (durationMs > 0) {
@@ -369,7 +386,7 @@ export class PlayerEngine {
         await mpv!.pause();
       }
     } else if (useNativeAudio) {
-      await NativeAudio.pause();
+      await NativeAudio.pause(options?.reason);
     } else if (this.howl) {
       this.howl.pause();
       if (this.webAudioEngine) void this.webAudioEngine.suspend();
@@ -683,6 +700,8 @@ export class PlayerEngine {
       const mediaListeners = [
         NativeAudio.addListener('mediaButtonPlay', () => handlers.play?.()),
         NativeAudio.addListener('mediaButtonPause', () => handlers.pause?.()),
+        // 耳机/蓝牙重连自动恢复（仅在暂停状态下，由 store 的 handlers.play 守卫）
+        NativeAudio.addListener('mediaButtonResume', () => handlers.play?.()),
         NativeAudio.addListener('mediaButtonNext', () => handlers.nexttrack?.()),
         NativeAudio.addListener('mediaButtonPrev', () => handlers.previoustrack?.()),
         NativeAudio.addListener('mediaButtonSeek', (data: any) => {

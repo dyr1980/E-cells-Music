@@ -51,7 +51,8 @@
 
 ### 🛠️ 后端服务支持（必看）
 运行本应用必须配合**自建**后端接口服务：
-- **后端项目地址**：[MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)
+- **后端项目地址（原版）**：[MakcRe/KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)
+- **后端项目地址（多用户版）**：[e-cells/KuGouMusicApi](https://github.com/e-cells/KuGouMusicApi)
 - ⚠️ **安全警告**：本项目不提供公共后端 API，请勿随意使用他人提供的公共服务，以免造成账号信息泄露！
 
 **部署提示：**
@@ -83,7 +84,7 @@
 
 ### 1. 克隆与安装依赖
 ```bash
-git clone [https://github.com/e-cells/E-cells-Music.git](https://github.com/e-cells/E-cells-Music.git)
+git clone https://github.com/e-cells/E-cells-Music.git
 cd E-cells-Music
 npm install --legacy-peer-deps
 ```

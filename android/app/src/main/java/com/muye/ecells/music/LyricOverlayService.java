@@ -15,6 +15,10 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -26,6 +30,7 @@ import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
+import androidx.core.content.ContextCompat;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -132,6 +137,17 @@ public class LyricOverlayService extends Service {
     private BroadcastReceiver screenReceiver;
     private boolean isScreenOn = true;
 
+    // 自主光感监听（sensor 模式）：脱离 Activity 生命周期，前台服务内闭环
+    // 让桌面歌词在任何 App 覆盖到前台（如高德地图导航）时仍能实时变色
+    private SensorManager sensorManager;
+    private Sensor lightSensor;
+    private boolean isSensorDark = false;
+    private boolean hasInitSensorState = false;
+    private SensorEventListener lightSensorListener;
+    // 防抖阈值（滞回区间，车机光感跳动频繁，避免临界抖动）
+    private static final float LIGHT_THRESHOLD_DARK = 15.0f;   // ≤15 lux → 深色
+    private static final float LIGHT_THRESHOLD_LIGHT = 30.0f;  // ≥30 lux → 浅色
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -180,10 +196,18 @@ public class LyricOverlayService extends Service {
             }
         };
         IntentFilter filter = new IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED);
-        registerReceiver(configChangeReceiver, filter);
+        // Android 14+/targetSdk34+ 必须显式声明 exported flag，否则抛 SecurityException
+        ContextCompat.registerReceiver(this, configChangeReceiver, filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED);
 
         lastDetectedNightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         startThemePolling();
+
+        // 初始化自主光感监听器；若恢复出的主题模式为 sensor，立即注册传感器
+        initSensorListener();
+        if ("sensor".equals(themeMode)) {
+            registerSensorIfNeeded();
+        }
 
         // Register screen on/off receiver to pause/resume timers when screen is off
         screenReceiver = new BroadcastReceiver() {
@@ -193,7 +217,9 @@ public class LyricOverlayService extends Service {
                     isScreenOn = false;
                     stopNativeLyricTimer();
                     stopThemePolling();
-                    Log.i(TAG, "Screen off: paused lyric timer and theme polling");
+                    // 屏幕熄灭时注销光感监听，省电且歌词此时不可见
+                    unregisterSensor();
+                    Log.i(TAG, "Screen off: paused lyric timer, theme polling and sensor");
                 } else if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
                     isScreenOn = true;
                     // Recalculate baseSystemMs to account for elapsed time while screen was off
@@ -201,14 +227,17 @@ public class LyricOverlayService extends Service {
                         startNativeLyricTimer();
                     }
                     startThemePolling();
-                    Log.i(TAG, "Screen on: resumed lyric timer and theme polling");
+                    // 屏幕点亮后若处于 sensor 模式，重新注册光感监听
+                    registerSensorIfNeeded();
+                    Log.i(TAG, "Screen on: resumed lyric timer, theme polling and sensor");
                 }
             }
         };
         IntentFilter screenFilter = new IntentFilter();
         screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
         screenFilter.addAction(Intent.ACTION_SCREEN_ON);
-        registerReceiver(screenReceiver, screenFilter);
+        ContextCompat.registerReceiver(this, screenReceiver, screenFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED);
 
         Log.i(TAG, "LyricOverlayService created");
     }
@@ -228,6 +257,7 @@ public class LyricOverlayService extends Service {
     public void onDestroy() {
         stopNativeLyricTimer();
         stopThemePolling();
+        unregisterSensor();
         hideOverlay();
         if (configChangeReceiver != null) {
             try {
@@ -568,7 +598,8 @@ public class LyricOverlayService extends Service {
             prefs.edit().putInt("dark_color_index", darkColorIndex).apply();
         }
         final boolean themeChanged = (newThemeMode != null
-            && (newThemeMode.equals("light") || newThemeMode.equals("dark") || newThemeMode.equals("system"))
+            && (newThemeMode.equals("light") || newThemeMode.equals("dark")
+                || newThemeMode.equals("system") || newThemeMode.equals("sensor"))
             && !newThemeMode.equals(themeMode));
         final String oldThemeMode = themeMode;
         if (themeChanged) {
@@ -621,6 +652,12 @@ public class LyricOverlayService extends Service {
                     startThemePolling();
                 } else if ("system".equals(oldThemeMode)) {
                     stopThemePolling();
+                }
+                // sensor 模式：注册/注销自主光感监听（与 setThemeMode 对称）
+                if ("sensor".equals(themeMode)) {
+                    registerSensorIfNeeded();
+                } else if ("sensor".equals(oldThemeMode)) {
+                    unregisterSensor();
                 }
             }
             line1.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSize);
@@ -735,8 +772,73 @@ public class LyricOverlayService extends Service {
 
     // ── Color ──
 
+    /**
+     * 初始化自主光感监听器（sensor 模式专用）。
+     * 复用与 MainActivity 一致的滞回防抖阈值，但触发动作改为直接重绘歌词颜色，
+     * 使桌面歌词在 App 被其他应用（如高德地图）覆盖到后台时仍能实时变色。
+     */
+    private void initSensorListener() {
+        if (lightSensorListener != null) return;
+        lightSensorListener = new SensorEventListener() {
+            @Override
+            public void onSensorChanged(SensorEvent event) {
+                if (event.sensor.getType() != Sensor.TYPE_LIGHT) return;
+                float lux = event.values[0];
+                boolean stateChanged = false;
+                if (lux <= LIGHT_THRESHOLD_DARK) {
+                    if (!isSensorDark || !hasInitSensorState) {
+                        isSensorDark = true;
+                        hasInitSensorState = true;
+                        stateChanged = true;
+                    }
+                } else if (lux >= LIGHT_THRESHOLD_LIGHT) {
+                    if (isSensorDark || !hasInitSensorState) {
+                        isSensorDark = false;
+                        hasInitSensorState = true;
+                        stateChanged = true;
+                    }
+                }
+                if (stateChanged && "sensor".equals(themeMode)) {
+                    Log.i(TAG, "Sensor light changed (" + lux + " lux) -> " + (isSensorDark ? "dark" : "light"));
+                    handler.post(LyricOverlayService.this::applyColorToViews);
+                }
+            }
+
+            @Override
+            public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+        };
+    }
+
+    private void registerSensorIfNeeded() {
+        if (!"sensor".equals(themeMode) || !isScreenOn) return;
+        if (sensorManager == null) {
+            sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        }
+        if (sensorManager == null) return;
+        if (lightSensor == null) {
+            lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT);
+        }
+        if (lightSensor == null) {
+            Log.w(TAG, "No TYPE_LIGHT sensor on device; sensor mode falls back to system UI mode");
+            return;
+        }
+        // initSensorListener 幂等，重复调用安全
+        initSensorListener();
+        sensorManager.registerListener(lightSensorListener, lightSensor, SensorManager.SENSOR_DELAY_NORMAL);
+        Log.i(TAG, "Light sensor registered for lyric color (sensor mode)");
+    }
+
+    private void unregisterSensor() {
+        if (sensorManager != null && lightSensorListener != null) {
+            sensorManager.unregisterListener(lightSensorListener);
+            Log.i(TAG, "Light sensor unregistered");
+        }
+    }
+
     public void setThemeMode(String mode) {
-        if (mode == null || (!mode.equals("light") && !mode.equals("dark") && !mode.equals("system"))) return;
+        if (mode == null
+            || (!mode.equals("light") && !mode.equals("dark")
+                && !mode.equals("system") && !mode.equals("sensor"))) return;
         if (mode.equals(themeMode)) return;
         String oldMode = themeMode;
         themeMode = mode;
@@ -748,6 +850,12 @@ public class LyricOverlayService extends Service {
                 startThemePolling();
             } else if (!"system".equals(mode) && "system".equals(oldMode)) {
                 stopThemePolling();
+            }
+            // 进入 sensor 模式注册光感监听，离开时注销（与 system 轮询对称）
+            if ("sensor".equals(mode) && !"sensor".equals(oldMode)) {
+                registerSensorIfNeeded();
+            } else if (!"sensor".equals(mode) && "sensor".equals(oldMode)) {
+                unregisterSensor();
             }
         });
     }
@@ -762,6 +870,14 @@ public class LyricOverlayService extends Service {
         } else if ("dark".equals(themeMode)) {
             colorArray = DARK_COLOR_HEX;
             colorIdx = darkColorIndex;
+        } else if ("sensor".equals(themeMode)) {
+            // sensor 模式：用 Service 自己采集的 isSensorDark；尚未拿到读数时回退系统 UI 模式，避免首帧空白
+            boolean isDark = hasInitSensorState
+                ? isSensorDark
+                : ((getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                    == Configuration.UI_MODE_NIGHT_YES);
+            colorArray = isDark ? DARK_COLOR_HEX : LIGHT_COLOR_HEX;
+            colorIdx = isDark ? darkColorIndex : lightColorIndex;
         } else {
             int nightMode = getResources().getConfiguration().uiMode
                 & Configuration.UI_MODE_NIGHT_MASK;

@@ -120,10 +120,15 @@ public class NativeAudioPlugin {
                     playWhenReady = false;
                     exoPlayer.play();
                     startTimeUpdates();
+                    MediaNotificationService svc = MediaNotificationService.getInstance();
+                    if (svc != null) svc.clearDeviceDisconnectFlag();
                     emitEvent("play", "{}");
                 }
             } else if (playbackState == Player.STATE_ENDED) {
                 stopTimeUpdates();
+                // 歌曲自然结束不属于「设备断开暂停」，清除标记避免之后戴耳机误恢复
+                MediaNotificationService svc = MediaNotificationService.getInstance();
+                if (svc != null) svc.clearDeviceDisconnectFlag();
                 emitEvent("ended", "{}");
             }
         }
@@ -374,7 +379,7 @@ public class NativeAudioPlugin {
             switch (method) {
                 case "loadAudio": return onLoadAudioSync(params);
                 case "play": return onPlaySync();
-                case "pause": return onPauseSync();
+                case "pause": return onPauseSync(params);
                 case "stop": return onStopSync();
                 case "seek": return onSeekSync(params);
                 case "setVolume": return onSetVolumeSync(params);
@@ -539,6 +544,9 @@ public class NativeAudioPlugin {
 
     private String onPlaySync() {
         if (exoPlayer == null) return "{\"__nativeError\":\"no audio loaded\"}";
+        // 用户/UI/重连恢复触发的播放都属于新一轮播放周期，清除「设备断开暂停」标记
+        MediaNotificationService svc = MediaNotificationService.getInstance();
+        if (svc != null) svc.clearDeviceDisconnectFlag();
         if (isPrepared) {
             exoPlayer.play();
             startTimeUpdates();
@@ -551,10 +559,21 @@ public class NativeAudioPlugin {
     }
 
     private String onPauseSync() {
+        return onPauseSync(null);
+    }
+
+    private String onPauseSync(Map<String, String> params) {
         if (exoPlayer != null && exoPlayer.isPlaying()) {
             exoPlayer.pause();
             stopTimeUpdates();
             emitEvent("pause", "{}");
+        }
+        // 仅当 pause 来自 UI 主动操作（reason=ui）时，清除「设备断开暂停」标记；
+        // 设备断开/焦点丢失经 mediaButtonPause 触发的 pause 不带 reason，保留标记以便重连恢复。
+        String reason = params != null ? params.get("reason") : null;
+        if ("ui".equals(reason)) {
+            MediaNotificationService svc = MediaNotificationService.getInstance();
+            if (svc != null) svc.clearDeviceDisconnectFlag();
         }
         return "{}";
     }

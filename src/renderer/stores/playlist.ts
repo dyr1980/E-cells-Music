@@ -1349,6 +1349,15 @@ export const usePlaylistStore = defineStore('playlist', {
         return false;
       }
     },
+    /**
+     * 账号身份变更时清空用户私有数据，避免短暂显示上一个账号的收藏/歌单。
+     * 仅清 favorites 与 userPlaylists（playlist store 持久化且不按用户隔离）。
+     */
+    resetUserScopedData() {
+      if (favoritesLoader) favoritesLoader.abort();
+      this.favorites = [];
+      this.userPlaylists = [];
+    },
     async fetchUserPlaylists() {
       try {
         const PAGE_SIZE = 30;

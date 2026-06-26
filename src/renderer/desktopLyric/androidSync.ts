@@ -271,11 +271,13 @@ export const initAndroidLyricSync = async () => {
   // 监听主题切换，自动同步歌词颜色主题
   const syncLyricTheme = () => {
     if (!desktopLyricStore.settings.enabled) return;
-    if (settingStore.theme === 'system') {
-      NativeLyricBridge.setLyricTheme({ themeMode: 'system' }).catch(() => {});
+    const theme = settingStore.theme;
+    if (theme === 'system' || theme === 'sensor') {
+      // system / sensor 都交给原生 Service 自行判定（轮询系统 UI 模式或自主感光）
+      NativeLyricBridge.setLyricTheme({ themeMode: theme }).catch(() => {});
     } else {
-      const isDark = document.documentElement.classList.contains('dark');
-      NativeLyricBridge.setLyricTheme({ themeMode: isDark ? 'dark' : 'light' }).catch(() => {});
+      // light / dark：前端固定主题，直接透传当前显式取值
+      NativeLyricBridge.setLyricTheme({ themeMode: theme }).catch(() => {});
     }
   };
   const darkObserver = new MutationObserver(syncLyricTheme);

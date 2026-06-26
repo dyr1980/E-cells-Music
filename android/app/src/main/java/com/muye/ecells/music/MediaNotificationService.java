@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.graphics.Bitmap;
@@ -27,6 +29,7 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.session.MediaButtonReceiver;
 import androidx.media.MediaBrowserServiceCompat;
 
@@ -71,6 +74,13 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
     private AudioFocusRequest focusRequest;
     private boolean hasAudioFocus = false;
 
+    // <== 新增：耳机摘下/蓝牙断开自动暂停，戴上/重连自动恢复
+    // 标记「上一次暂停是否由设备断开导致」，只有它为 true 时，设备重连才自动恢复播放。
+    private boolean pausedByDeviceDisconnect = false;
+    private AudioDeviceCallback audioDeviceCallback;
+    // AudioDeviceCallback 注册后会立刻回调一次当前设备快照，用此标志忽略启动瞬间的初始回调。
+    private boolean deviceCallbackReady = false;
+
     // <== 新增：监听耳机拔出/蓝牙断开的防社死广播
     private final BroadcastReceiver noisyReceiver = new BroadcastReceiver() {
         @Override
@@ -78,11 +88,64 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
             if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
                 if (isPlaying) {
                     Log.i(TAG, "Audio becoming noisy (headphone disconnected), pausing playback.");
+                    pausedByDeviceDisconnect = true;
                     emitMediaButton("mediaButtonPause");
                 }
             }
         }
     };
+
+    // <== 新增：监听有线/蓝牙耳机接入与移除，配合上面的标记实现「摘下暂停、戴上恢复」
+    private boolean isHeadsetOrBluetoothDevice(AudioDeviceInfo d) {
+        switch (d.getType()) {
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case AudioDeviceInfo.TYPE_USB_HEADSET:
+            case AudioDeviceInfo.TYPE_BLE_HEADSET:
+            case AudioDeviceInfo.TYPE_BLE_SPEAKER:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void createAudioDeviceCallback() {
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] devices) {
+                if (!deviceCallbackReady) return;
+                // MV 播放器活跃时，耳机事件不干预音乐
+                if (MvPlayerActivity.currentInstance != null) return;
+                // 只有「因设备断开而暂停」的情况才自动恢复，避免用户主动暂停后戴上耳机突然放歌
+                if (!pausedByDeviceDisconnect || isPlaying) return;
+                for (AudioDeviceInfo d : devices) {
+                    if (isHeadsetOrBluetoothDevice(d)) {
+                        Log.i(TAG, "Headset/Bluetooth reconnected, resuming playback.");
+                        pausedByDeviceDisconnect = false;
+                        emitMediaButton("mediaButtonResume");
+                        break;
+                    }
+                }
+            }
+
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] devices) {
+                if (!deviceCallbackReady) return;
+                if (MvPlayerActivity.currentInstance != null) return;
+                // noisyReceiver 的冗余兜底：某些 ROM 上 BECOMING_NOISY 来得慢，这里再保险一次
+                if (!isPlaying) return;
+                for (AudioDeviceInfo d : devices) {
+                    if (isHeadsetOrBluetoothDevice(d)) {
+                        Log.i(TAG, "Headset/Bluetooth removed (backup of BECOMING_NOISY), pausing playback.");
+                        pausedByDeviceDisconnect = true;
+                        emitMediaButton("mediaButtonPause");
+                        break;
+                    }
+                }
+            }
+        };
+    }
 
     @Override
     public void onCreate() {
@@ -104,9 +167,19 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        // <== 新增：注册防社死广播
-        registerReceiver(noisyReceiver, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
-        
+        // <== 新增：注册防社死广播（Android 14+/targetSdk34+ 必须显式声明 exported flag，否则抛 SecurityException）
+        ContextCompat.registerReceiver(this, noisyReceiver,
+            new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+            ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // <== 新增：监听耳机/蓝牙接入移除，实现「摘下暂停、戴上恢复」
+        createAudioDeviceCallback();
+        if (audioManager != null && audioDeviceCallback != null) {
+            audioManager.registerAudioDeviceCallback(audioDeviceCallback, handler);
+            // 忽略注册后立即触发的初始设备快照
+            handler.postDelayed(() -> deviceCallbackReady = true, 500);
+        }
+
         Log.i(TAG, "MediaNotificationService created");
     }
 
@@ -206,14 +279,24 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
             cachedArtwork = null;
         }
         lastCoverUrl = null;
-        
+
         // <== 新增：注销防社死广播
         try {
             unregisterReceiver(noisyReceiver);
         } catch (Exception e) {
             Log.e(TAG, "Failed to unregister noisyReceiver", e);
         }
-        
+
+        // <== 新增：注销耳机/蓝牙设备监听
+        if (audioDeviceCallback != null && audioManager != null) {
+            try {
+                audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unregister audioDeviceCallback", e);
+            }
+            audioDeviceCallback = null;
+        }
+
         super.onDestroy();
         Log.i(TAG, "MediaNotificationService destroyed");
     }
@@ -446,6 +529,8 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
     private class MediaSessionCallbacks extends MediaSessionCompat.Callback {
         @Override
         public void onPlay() {
+            // 锁屏/通知栏/蓝牙耳机按键等用户主动意图，重置「设备断开暂停」标记
+            pausedByDeviceDisconnect = false;
             // MV 播放器活跃时，控制 MV 播放
             MvPlayerActivity mvActivity = MvPlayerActivity.currentInstance;
             if (mvActivity != null) {
@@ -457,6 +542,8 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
 
         @Override
         public void onPause() {
+            // 锁屏/通知栏/蓝牙耳机按键等用户主动意图，重置「设备断开暂停」标记
+            pausedByDeviceDisconnect = false;
             // MV 播放器活跃时，控制 MV 暂停
             MvPlayerActivity mvActivity = MvPlayerActivity.currentInstance;
             if (mvActivity != null) {
@@ -469,6 +556,7 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
         @Override
         public void onSkipToNext() {
             Log.i(TAG, "MediaSession: onSkipToNext triggered");
+            pausedByDeviceDisconnect = false;
             // MV 播放器活跃时，切换 MV 下一曲
             MvPlayerActivity mvActivity = MvPlayerActivity.currentInstance;
             if (mvActivity != null) {
@@ -481,6 +569,7 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
         @Override
         public void onSkipToPrevious() {
             Log.i(TAG, "MediaSession: onSkipToPrevious triggered");
+            pausedByDeviceDisconnect = false;
             // MV 播放器活跃时，切换 MV 上一曲
             MvPlayerActivity mvActivity = MvPlayerActivity.currentInstance;
             if (mvActivity != null) {
@@ -497,20 +586,31 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
 
         @Override
         public void onStop() {
+            pausedByDeviceDisconnect = false;
             emitMediaButton("mediaButtonStop");
         }
 
         @Override
         public void onPlayFromSearch(String query, Bundle extras) {
             Log.i(TAG, "Voice search: " + query);
+            pausedByDeviceDisconnect = false;
             emitMediaButton("mediaButtonPlayFromSearch", query);
         }
 
         @Override
         public void onPlayFromMediaId(String mediaId, Bundle extras) {
             Log.i(TAG, "Play from media id: " + mediaId);
+            pausedByDeviceDisconnect = false;
             emitMediaButton("mediaButtonPlayFromSearch", mediaId);
         }
+    }
+
+    /**
+     * 清除「因设备断开导致的暂停」标记。供 NativeAudioPlugin 在用户/UI 主动播放时调用，
+     * 表示新一轮播放周期开始，之后即使设备重连也不应误恢复。
+     */
+    public void clearDeviceDisconnectFlag() {
+        pausedByDeviceDisconnect = false;
     }
 
     // ── Emit Events to WebView ──
@@ -567,7 +667,8 @@ public class MediaNotificationService extends MediaBrowserServiceCompat {
                     hasAudioFocus = true;
                     break;
                 case AudioManager.AUDIOFOCUS_LOSS:
-                    // 永久丢失焦点（其他音乐/视频 App 接管）→ 暂停
+                    // 永久丢失焦点（其他音乐/视频 App 接管）→ 暂停；非设备断开，重置标记避免误恢复
+                    pausedByDeviceDisconnect = false;
                     emitMediaButton("mediaButtonPause");
                     abandonAudioFocus();
                     break;

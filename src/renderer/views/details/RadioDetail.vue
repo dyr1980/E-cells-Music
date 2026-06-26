@@ -430,7 +430,7 @@ onIdChange(() => {
             </template>
 
             <template #actions>
-              <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+              <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" :hide-mv="true" />
             </template>
 
             <template #collapsed-actions>
@@ -552,7 +552,7 @@ onIdChange(() => {
 
         <div class="song-list-sticky sticky z-[110] bg-bg-main" :style="{ top: '0px' }">
           <div class="px-4 pb-2 pt-2">
-            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" />
+            <ActionRow @play="handlePlayAll" @batch="openBatchDrawer" :hide-mv="true" :icon-only="true" />
           </div>
           <div class="border-b border-border-light/10 px-4">
             <div class="flex items-center justify-between h-10">

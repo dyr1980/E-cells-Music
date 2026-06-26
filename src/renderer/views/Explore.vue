@@ -52,6 +52,8 @@ import { getArtistList } from '@/api/artist';
 import type { SortField, SortOrder } from '@/components/music/SongListHeader.vue';
 import { iconCurrentLocation, iconSearch, iconSparkles } from '@/icons';
 import { replaceQueueAndPlay } from '@/utils/playback';
+import { launchMvWithPlaylist, type MvPlaylistItem } from '@/utils/launchMv';
+import { enrichSongsWithMv } from '@/utils/enrichMv';
 import { useToastStore } from '@/stores/toast';
 import VirtualGrid from '@/components/ui/VirtualGrid.vue';
 
@@ -86,6 +88,8 @@ const settingStore = useSettingStore();
 const toastStore = useToastStore();
 const recommendedPlaylists = ref<PlaylistMeta[]>([]);
 const newSongs = ref<Song[]>([]);
+// 新歌MV异步加载的取消控制器，切走/卸载时 abort 以释放网络
+let newSongMvAbort: AbortController | null = null;
 const loadingPlaylists = ref(true);
 const loadingNewSongs = ref(false);
 const activeTabIndex = ref(props.initialTab);
@@ -320,6 +324,13 @@ const loadNewSongs = async () => {
   } finally {
     loadingNewSongs.value = false;
   }
+
+  if (newSongs.value.length > 0) {
+    // 取消上一次未完成的 MV 加载，避免请求堆积阻塞网络
+    newSongMvAbort?.abort();
+    newSongMvAbort = new AbortController();
+    enrichSongsWithMv(newSongs.value, { signal: newSongMvAbort.signal }).catch(() => {});
+  }
 };
 
 const loadRanks = async () => {
@@ -493,6 +504,32 @@ const openNewSongBatchDrawer = () => {
   showNewSongBatchDrawer.value = true;
 };
 
+const newSongMvCount = computed(() => newSongs.value.filter(s => (s.mvHash ?? '').trim()).length);
+
+const handlePlayNewSongMv = async () => {
+  const mvSongs = newSongs.value.filter(s => (s.mvHash ?? '').trim());
+  if (mvSongs.length === 0) {
+    toastStore.info('当前列表暂无MV');
+    return;
+  }
+  const playlist: MvPlaylistItem[] = mvSongs.map(s => ({
+    hash: s.mvHash!,
+    albumAudioId: String(s.mixSongId || s.id || ''),
+    title: s.title,
+    artist: s.artist,
+    coverUrl: s.coverUrl,
+  }));
+  await launchMvWithPlaylist({
+    playlist,
+    startIndex: 0,
+    hash: playlist[0].hash,
+    albumAudioId: playlist[0].albumAudioId,
+    title: playlist[0].title,
+    artist: playlist[0].artist,
+    cover: playlist[0].coverUrl,
+  });
+};
+
 const handleRankLocate = () => rankSongListRef.value?.scrollToActive?.();
 
 const handleNewSongLocate = () => newSongListRef.value?.scrollToActive?.();
@@ -560,6 +597,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   detachScrollTarget(); // 卸载时解绑代理事件
+  newSongMvAbort?.abort(); // 卸载时取消未完成的MV加载
 });
 
 onActivated(() => {
@@ -568,6 +606,7 @@ onActivated(() => {
 
 onDeactivated(() => {
   detachScrollTarget(); // 缓存失活时解绑
+  newSongMvAbort?.abort(); // 缓存失活时取消未完成的MV加载
 });
 
 watch(
@@ -739,12 +778,12 @@ const filteredArtistCards = computed(() => {
     </div>
 
     <div v-else-if="activeTabIndex === 1" class="mt-0">
-      <div class="rank-toolbar sticky z-[120] bg-bg-main/80 backdrop-blur-xl -mx-4 px-4 md:-mx-0 md:px-0" :style="{ top: showHeader ? '102px' : '0' }">
+      <div class="rank-toolbar sticky z-[120] bg-bg-main -mx-4 px-4 md:-mx-0 md:px-0" :style="{ top: showHeader ? '102px' : '0' }">
         <div class="rank-toolbar-inner">
           <CustomSelector :label="rankLabel" @click="showRankPicker = true" />
           <div class="rank-toolbar-actions">
             <div class="rank-action-scroll scrollbar-hide">
-              <ActionRow @play="playRankSongs" @batch="openRankBatchDrawer" />
+              <ActionRow @play="playRankSongs" @batch="openRankBatchDrawer" :hide-mv="true" :icon-only="isGeckoView" />
             </div>
           </div>
         </div>
@@ -753,7 +792,7 @@ const filteredArtistCards = computed(() => {
       <BatchActionDrawer v-model:open="showRankBatchDrawer" :songs="rankSongs" source-id="rank" />
 
       <div
-        class="song-list-sticky sticky z-[110] bg-bg-main/90 backdrop-blur-xl border-b border-border-light/10 -mx-4 px-4 md:-mx-0 md:px-0"
+        class="song-list-sticky sticky z-[110] bg-bg-main border-b border-border-light/10 -mx-4 px-4 md:-mx-0 md:px-0"
         :style="{ top: `${rankToolbarOffset}px` }"
       >
         <div class="flex items-center justify-between h-14">
@@ -841,7 +880,7 @@ const filteredArtistCards = computed(() => {
     </div>
 
     <div v-else-if="activeTabIndex === 3" class="mt-0">
-      <div class="new-song-toolbar sticky z-[120] bg-bg-main/80 backdrop-blur-xl -mx-4 px-4 md:-mx-0 md:px-0" :style="{ top: showHeader ? '102px' : '0' }">
+      <div class="new-song-toolbar sticky z-[120] bg-bg-main -mx-4 px-4 md:-mx-0 md:px-0" :style="{ top: showHeader ? '102px' : '0' }">
         <div class="new-song-toolbar-inner">
           <div class="new-song-title-wrap">
             <div class="new-song-badge-icon shadow-sm">
@@ -853,7 +892,7 @@ const filteredArtistCards = computed(() => {
           </div>
           <div class="new-song-toolbar-actions">
             <div class="rank-action-scroll scrollbar-hide">
-              <ActionRow @play="playNewSongs" @batch="openNewSongBatchDrawer" />
+              <ActionRow @play="playNewSongs" @mv="handlePlayNewSongMv" @batch="openNewSongBatchDrawer" :mv-count="newSongMvCount" :icon-only="isGeckoView" />
             </div>
           </div>
         </div>
@@ -862,7 +901,7 @@ const filteredArtistCards = computed(() => {
       <BatchActionDrawer v-model:open="showNewSongBatchDrawer" :songs="newSongs" source-id="new-song" />
 
       <div
-        class="song-list-sticky sticky z-[110] bg-bg-main/90 backdrop-blur-xl border-b border-border-light/10 -mx-4 px-4 md:-mx-0 md:px-0"
+        class="song-list-sticky sticky z-[110] bg-bg-main border-b border-border-light/10 -mx-4 px-4 md:-mx-0 md:px-0"
         :style="{ top: `${newSongToolbarOffset}px` }"
       >
         <div class="flex items-center justify-between h-14">

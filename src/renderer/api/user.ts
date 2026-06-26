@@ -15,7 +15,10 @@ export function registerDevice() {
  * 获取二维码 Key (酷狗扫码)
  */
 export function getLoginQrKey() {
-  return request.get('/login/qr/key');
+  // 加 timestamp 打破后端 apicache 缓存，避免多账号切换时拿到旧 key 导致串号
+  return request.get('/login/qr/key', {
+    params: { timestamp: Date.now() },
+  });
 }
 
 /**
@@ -31,8 +34,9 @@ export function createLoginQr(key: string) {
  * 检查二维码状态 (酷狗扫码)
  */
 export function checkLoginQr(key: string) {
+  // 轮询时同一 key 重复请求，加 timestamp 防止后端缓存锁死扫码状态
   return request.get('/login/qr/check', {
-    params: { key },
+    params: { key, timestamp: Date.now() },
   });
 }
 
@@ -58,7 +62,10 @@ export function loginBySms(mobile: string, code: string) {
  * 创建微信登录二维码
  */
 export function createWxLogin() {
-  return request.get('/login/wx/create');
+  // 加 timestamp 打破后端 apicache 缓存，避免多账号切换时拿到旧 uuid 秒回首页
+  return request.get('/login/wx/create', {
+    params: { timestamp: Date.now() },
+  });
 }
 
 /**

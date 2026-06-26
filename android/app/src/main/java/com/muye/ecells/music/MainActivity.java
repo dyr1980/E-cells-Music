@@ -108,11 +108,8 @@ public class MainActivity extends AppCompatActivity {
                 if (stateChanged && "sensor".equals(themeAutoMode)) {
                     Log.i(TAG, "环境光变化 (" + lux + " lux), 强制切换模式: " + (isSensorDark ? "深色" : "浅色"));
                     pushSystemThemeToFrontend(isSensorDark);
-                    // 直接通知桌面歌词服务，确保后台时也能更新歌词颜色
-                    LyricOverlayService service = LyricOverlayService.getInstance();
-                    if (service != null) {
-                        service.setThemeMode(isSensorDark ? "dark" : "light");
-                    }
+                    // 桌面歌词颜色已下沉到 LyricOverlayService 自主感光，此处不再由 Activity 驱动，
+                    // 避免 Activity 进入后台（如高德地图覆盖）注销传感器后歌词颜色冻结。
                 }
             }
         }
@@ -173,6 +170,11 @@ public class MainActivity extends AppCompatActivity {
 
             setContentView(R.layout.activity_main);
             geckoView = findViewById(R.id.geckoView);
+
+            // GeckoView 必须可获取焦点，InputMethodManager.showSoftInput 才能找到目标 View 弹出输入法。
+            // 不设置时，点击输入框（尤其密码框触发安全键盘切换）经常无法调出输入法。
+            geckoView.setFocusable(true);
+            geckoView.setFocusableInTouchMode(true);
 
             // 原生视频播放器的 TextureView 覆盖层
             TextureView nativeVideoSurface = findViewById(R.id.nativeVideoSurface);
@@ -462,6 +464,13 @@ public class MainActivity extends AppCompatActivity {
             registerLightSensorIfNeeded();
         } else if (!"sensor".equals(mode) && "sensor".equals(oldMode)) {
             unregisterLightSensor();
+        }
+
+        // 把主题模式同步给桌面歌词 Service：sensor 模式下 Service 自主感光，
+        // 其余（system）跟随系统。light/dark 不经此通道，由前端 androidSync 直接透传。
+        LyricOverlayService service = LyricOverlayService.getInstance();
+        if (service != null) {
+            service.setThemeMode("sensor".equals(mode) ? "sensor" : "system");
         }
 
         runOnUiThread(() -> pushSystemThemeToFrontend());

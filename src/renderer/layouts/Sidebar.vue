@@ -11,6 +11,7 @@ import RefreshIcon from '@/components/ui/RefreshIcon.vue';
 import Scrollbar from '@/components/ui/Scrollbar.vue';
 import Switch from '@/components/ui/Switch.vue';
 import ImportPlaylistDialog from '@/components/music/ImportPlaylistDialog.vue';
+import UserEntryMenu from '@/components/user/UserEntryMenu.vue';
 import { isLowPerformance } from '@/utils/performanceProfile';
 import {
   iconClock,
@@ -399,25 +400,51 @@ watch(
         <div
           class="user-info-card flex items-center overflow-hidden bg-bg-info-card border border-black/[0.08] dark:border-white/10 rounded-[20px] p-1 transition-colors duration-150"
         >
+          <!-- 已登录：点击弹出「个人资料 / 用户切换」下拉菜单 -->
+          <UserEntryMenu v-if="isLoggedIn" side="top" class="min-w-0 flex-1">
+            <div
+              class="sidebar-user-link min-w-0 flex-1 flex items-center gap-3 p-1.5 rounded-[14px] cursor-pointer transition-colors duration-150 active:scale-[0.98]"
+            >
+              <div
+                class="w-[34px] h-[34px] shrink-0 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden"
+              >
+                <Avatar :src="userInfo?.pic" class="w-full h-full" />
+              </div>
+              <div class="flex flex-col min-w-0 flex-1 overflow-hidden">
+                <span
+                  class="text-[13px] font-semibold text-primary truncate leading-tight tracking-tight"
+                >
+                  {{ userInfo?.nickname }}
+                </span>
+                <span
+                  class="truncate text-[9px] text-text-secondary font-medium opacity-60 tracking-wider"
+                >
+                  Lv.{{ userInfo?.p_grade || 0 }}
+                </span>
+              </div>
+            </div>
+          </UserEntryMenu>
+          <!-- 未登录：直接跳登录页 -->
           <div
+            v-else
             class="sidebar-user-link min-w-0 flex-1 flex items-center gap-3 p-1.5 rounded-[14px] cursor-pointer transition-colors duration-150 active:scale-[0.98]"
-            @click="navigateTo(isLoggedIn ? '/main/profile' : '/login')"
+            @click="navigateTo('/login')"
           >
             <div
               class="w-[34px] h-[34px] shrink-0 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden"
             >
-              <Avatar :src="isLoggedIn ? userInfo?.pic : ''" class="w-full h-full" />
+              <Avatar :src="''" class="w-full h-full" />
             </div>
             <div class="flex flex-col min-w-0 flex-1 overflow-hidden">
               <span
                 class="text-[13px] font-semibold text-primary truncate leading-tight tracking-tight"
               >
-                {{ isLoggedIn ? userInfo?.nickname : '未登录' }}
+                未登录
               </span>
               <span
                 class="truncate text-[9px] text-text-secondary font-medium opacity-60 tracking-wider"
               >
-                {{ isLoggedIn ? `Lv.${userInfo?.p_grade || 0}` : '点击登录账号' }}
+                点击登录账号
               </span>
             </div>
           </div>
