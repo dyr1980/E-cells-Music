@@ -1,0 +1,512 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shiyin_music/controllers/auth_controller.dart';
+import 'package:shiyin_music/controllers/player_controller.dart';
+import 'package:shiyin_music/controllers/theme_controller.dart';
+import 'package:shiyin_music/models/music_models.dart' hide formatDuration;
+import 'package:shiyin_music/services/desktop_system_integration.dart';
+import 'package:shiyin_music/services/music_api.dart';
+import 'package:shiyin_music/services/vip_background_task.dart';
+import 'package:shiyin_music/ui/form_factor.dart';
+import 'package:shiyin_music/ui/pages/settings_page.dart';
+import 'package:shiyin_music/ui/widgets/toast.dart';
+
+/// 设置项可见性门控（Task 4 要求 5/6）：
+/// - 桌面端隐藏移动专属三组：连接新音频设备自动播放 / 后台打断机制 /
+///   增加听歌时长；
+/// - 桌面端「桌面」分组含「开机自启」开关（移动端无「桌面」分组）；
+/// - 移动端三组原样显示、「桌面」分组不出现；
+/// - 开机自启切换经 [autoStartManager] 抽象调用 fake register/unregister，
+///   失败时 UI 回滚到 OS 真实状态。
+void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  tearDown(() {
+    debugDesktopFormFactorOverride = null;
+  });
+
+  group('桌面形态', () {
+    late _RecordingAutoStartManager autoStart;
+
+    setUp(() {
+      debugDesktopFormFactorOverride = true;
+      autoStart = _RecordingAutoStartManager();
+      autoStartManager = autoStart;
+    });
+
+    tearDown(() {
+      autoStartManager = _LaunchAtStartupNoop();
+    });
+
+    testWidgets('隐藏移动专属三组，显示桌面分组与开机自启开关', (tester) async {
+      await _pump(tester);
+
+      expect(find.text('连接新音频设备自动播放'), findsNothing);
+      expect(find.text('后台打断机制'), findsNothing);
+      expect(find.text('增加听歌时长'), findsNothing);
+      expect(find.text('播放页保持屏幕常亮'), findsNothing);
+      // 歌词页切歌键同属移动端专属（桌面无移动端歌词页，开关在此无意义）。
+      expect(find.text('歌词页切歌键'), findsNothing);
+
+      expect(find.text('桌面'), findsOneWidget);
+      expect(find.text('关闭时最小化到托盘'), findsOneWidget);
+      expect(find.text('开机自启'), findsOneWidget);
+      expect(find.text('下载位置'), findsOneWidget);
+      expect(find.text('重置窗口'), findsOneWidget);
+
+      // 桌面恒横屏、无车机概念：横屏/车机开关不出现
+      expect(find.text('横屏模式'), findsNothing);
+      expect(find.text('车机模式'), findsNothing);
+
+      // 默认关。
+      expect(_autoStartSwitch(tester).value, isFalse);
+      expect(autoStart.reads, 1);
+      expect(autoStart.writes, isEmpty);
+    });
+
+    testWidgets('切换开关调用 fake register，并回读实际状态', (tester) async {
+      await _pump(tester);
+      final switchFinder = _autoStartSwitchFinder(tester);
+
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      expect(autoStart.writes, [true]);
+      expect(_autoStartSwitch(tester).value, isTrue);
+
+      // 再点回去：disable。
+      await tester.tap(switchFinder);
+      await tester.pump();
+      await tester.pump();
+
+      expect(autoStart.writes, [true, false]);
+      expect(_autoStartSwitch(tester).value, isFalse);
+    });
+
+    testWidgets('写注册表失败时开关回滚到关闭并提示', (tester) async {
+      autoStart.failOnWrite = true;
+      await _pump(tester);
+
+      await tester.tap(_autoStartSwitchFinder(tester));
+      await tester.pump();
+      await tester.pump();
+
+      // OS 实际状态（fake 中保持 false）被回填到 UI。
+      expect(autoStart.writes, [true]);
+      expect(_autoStartSwitch(tester).value, isFalse);
+      expect(find.text('设置开机自启失败'), findsOneWidget);
+
+      // 等 Toast 自动消失，避免测试结束仍挂 Timer。
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('回读结果与写入目标不一致时以 OS 为准', (tester) async {
+      // 模拟 enable 静默失败（如组策略拦截注册表写入）。
+      autoStart.silentWriteFailure = true;
+      await _pump(tester);
+
+      await tester.tap(_autoStartSwitchFinder(tester));
+      await tester.pump();
+      await tester.pump();
+
+      expect(_autoStartSwitch(tester).value, isFalse);
+      expect(find.text('设置开机自启失败'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('移动端形态', () {
+    testWidgets('移动专属三组原样显示，无「桌面」分组与开机自启', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      await _pump(tester);
+
+      expect(find.text('连接新音频设备自动播放'), findsOneWidget);
+      expect(find.text('后台打断机制'), findsOneWidget);
+      expect(find.text('增加听歌时长'), findsOneWidget);
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+
+      expect(find.text('桌面'), findsNothing);
+      expect(find.text('开机自启'), findsNothing);
+      expect(find.text('关闭时最小化到托盘'), findsNothing);
+      // 下载位置仅 PC 桌面形态提供（移动端下载走 App 专属目录，无此概念）。
+      expect(find.text('下载位置'), findsNothing);
+      expect(find.text('重置窗口'), findsNothing);
+    });
+
+    testWidgets('歌词页切歌键瓦片：默认关，点击后写回 controller 并即时刷新', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      final player = _FakePlayer();
+      await _pump(tester, player: player);
+
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+      final switchFinder = _switchFinderForText(tester, '歌词页切歌键');
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+
+      await tester.tap(find.text('歌词页切歌键'));
+      await tester.pump();
+
+      expect(player.lyricPageSkipWrites, [true]);
+      expect(player.lyricPageSkipButtonsEnabled, isTrue);
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
+    });
+
+    testWidgets('车机模式下车机、PC 专属场景隐藏歌词页切歌键', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      await _pump(tester, theme: _FakeTheme(carModeEnabled: true));
+
+      // 只有手机/平板形态需要该开关；车机横屏走分栏布局、没有歌词页底栏。
+      expect(find.text('歌词页切歌键'), findsNothing);
+      // 同组其他手机开关仍在，证明页面正常构建而非整体缺失。
+      expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+    });
+
+    testWidgets('车机设备（即使手动关闭车机模式）同样隐藏歌词页切歌键', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      await _pump(tester, theme: _FakeTheme(isAutomotiveDevice: true));
+
+      expect(find.text('歌词页切歌键'), findsNothing);
+      expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+    });
+
+    testWidgets('切换车机模式后歌词页切歌键瓦片即时显隐', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      final theme = _FakeTheme();
+      await _pump(tester, theme: theme);
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+
+      theme.carModeEnabled = true;
+      theme.notifyListeners();
+      await tester.pump();
+      expect(find.text('歌词页切歌键'), findsNothing);
+
+      theme.carModeEnabled = false;
+      theme.notifyListeners();
+      await tester.pump();
+      expect(find.text('歌词页切歌键'), findsOneWidget);
+    });
+
+    testWidgets('手机视口也显示横屏/车机开关（残留值可改）', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      // 手机视口：最短边 <600（此前提下旧逻辑会藏起开关）；
+      // 高度拉满使懒加载 ListView 一次性构建全部条目（免滚动断言）。
+      tester.view.physicalSize = const Size(400, 20000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final vipClaim = _FakeVipClaim();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: Toast.navigatorKey,
+          home: Scaffold(
+            body: SettingsPage(
+              api: _FakeApi(),
+              auth: _FakeAuth(vipClaim),
+              player: _FakePlayer(),
+              theme: _FakeTheme(),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('横屏模式'), findsOneWidget);
+      expect(find.text('车机模式'), findsOneWidget);
+    });
+
+    testWidgets('移动端形态下即使运行在 Windows 上也不显示 Windows 限制提示', (tester) async {
+      debugDesktopFormFactorOverride = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        tester.view.physicalSize = const Size(400, 20000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pump(tester);
+
+        expect(find.text('响度均衡'), findsOneWidget);
+        expect(
+          find.text('基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Windows 仅支持压低偏响歌曲'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('Windows 宿主 + FORCE_MOBILE 预览移动端布局时，常亮开关依然展示', (tester) async {
+      // 回归点：`--dart-define=FORCE_MOBILE=true` 只强制 isDesktopFormFactor
+      // 为 false，宿主平台仍是 windows。曾经的实现额外叠了
+      // `defaultTargetPlatform == TargetPlatform.android` 判断，导致这个
+      // 开关在移动端预览里凭空消失（真机 Android 上却是好的）。
+      // 可见性必须只跟形态走，与「后台打断机制」同口径。
+      debugDesktopFormFactorOverride = false;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester);
+
+        expect(find.text('播放页保持屏幕常亮'), findsOneWidget);
+        // 与同组「后台打断机制」「增加听歌时长」同进同出。
+        expect(find.text('后台打断机制'), findsOneWidget);
+        expect(find.text('增加听歌时长'), findsOneWidget);
+        expect(find.text('歌词页切歌键'), findsOneWidget);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  });
+
+  group('桌面形态响度提示', () {
+    testWidgets('桌面形态在 Windows 平台上不显示平台限制提示（mpv 后端已支持放大）', (tester) async {
+      debugDesktopFormFactorOverride = true;
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester);
+
+        expect(find.text('响度均衡'), findsOneWidget);
+        expect(
+          find.text('基于 EBU R128 LUFS 标准化，降低各首歌曲音量差异'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('仅支持压低'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  });
+}
+
+/// 从「开机自启」文本向上找到所在瓦片行的 Switch（确定性定位，
+/// 避免页面内多个 Switch 的歧义）。
+Switch _autoStartSwitch(WidgetTester tester) =>
+    tester.widget<Switch>(_autoStartSwitchFinder(tester));
+
+Finder _autoStartSwitchFinder(WidgetTester tester) =>
+    _switchFinderForText(tester, '开机自启');
+
+/// 从指定文案向上找到所在瓦片行的 [Switch]（确定性定位，
+/// 避免页面内多个 Switch 的歧义）。
+Finder _switchFinderForText(WidgetTester tester, String text) {
+  final textElement = tester.element(find.text(text));
+  Element? switchElement;
+  // 沿祖先链由近及远查找第一个含 Switch 子节点的多子节点（瓦片行 Row）。
+  textElement.visitAncestorElements((ancestor) {
+    ancestor.visitChildren((child) {
+      if (child.widget is Switch) {
+        switchElement ??= child;
+      }
+    });
+    return switchElement == null; // 找到后停止遍历
+  });
+  if (switchElement != null) {
+    return find.byElementPredicate(
+      (element) => identical(element, switchElement),
+    );
+  }
+  fail('未找到「$text」所在瓦片的开关');
+}
+
+Future<void> _pump(
+  WidgetTester tester, {
+  _FakePlayer? player,
+  _FakeTheme? theme,
+}) async {
+  // 超高视口让懒加载 ListView 一次性构建全部条目（免滚动断言）。
+  tester.view.physicalSize = const Size(1080, 20000);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+  final vipClaim = _FakeVipClaim();
+  await tester.pumpWidget(
+    MaterialApp(
+      navigatorKey: Toast.navigatorKey,
+      home: Scaffold(
+        body: SettingsPage(
+          api: _FakeApi(),
+          auth: _FakeAuth(vipClaim),
+          player: player ?? _FakePlayer(),
+          theme: theme ?? _FakeTheme(),
+        ),
+      ),
+    ),
+  );
+  // 两帧：prefs/auto-start 异步读取完成后的 setState。
+  await tester.pump();
+  await tester.pump();
+}
+
+// --- 测试替身 ---
+
+class _RecordingAutoStartManager implements AutoStartManager {
+  bool _enabled = false;
+  bool failOnWrite = false;
+  bool silentWriteFailure = false;
+  int reads = 0;
+  final List<bool> writes = [];
+
+  @override
+  Future<bool> isEnabled() async {
+    reads++;
+    return _enabled;
+  }
+
+  @override
+  Future<void> setEnabled(bool enabled) async {
+    writes.add(enabled);
+    if (failOnWrite) {
+      throw Exception('注册表写入被拒绝');
+    }
+    if (!silentWriteFailure) {
+      _enabled = enabled;
+    }
+  }
+}
+
+/// 测试结束还原全局 manager，避免污染真实注册表读取路径。
+class _LaunchAtStartupNoop implements AutoStartManager {
+  @override
+  Future<bool> isEnabled() async => false;
+
+  @override
+  Future<void> setEnabled(bool enabled) async {}
+}
+
+class _FakeVipClaim extends ChangeNotifier implements VipBackgroundTask {
+  @override
+  String statusText() => '未开启';
+
+  @override
+  bool get autoEnabled => false;
+
+  @override
+  bool get isClaiming => false;
+
+  @override
+  String get lastMessage => '';
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeAuth extends ChangeNotifier implements AuthController {
+  _FakeAuth(this.vipClaim);
+
+  @override
+  final VipBackgroundTask vipClaim;
+
+  @override
+  bool get isLoading => false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakePlayer extends ChangeNotifier implements PlayerController {
+  // 歌词页切歌键开关（issue #3）：默认关 = QQ 原版底栏。
+  @override
+  bool lyricPageSkipButtonsEnabled = false;
+
+  /// 设置页「语音搜歌」瓦片副标题读取（易格方案新增成员）。
+  @override
+  String voiceSearchMode = 'all';
+
+  /// 切歌键瓦片点击写回的入参记录（断言 UI → controller 接线）。
+  final List<bool> lyricPageSkipWrites = [];
+
+  @override
+  Future<void> setLyricPageSkipButtonsEnabled(bool enabled) async {
+    lyricPageSkipWrites.add(enabled);
+    lyricPageSkipButtonsEnabled = enabled;
+    notifyListeners();
+  }
+
+  /// 设置页「播放页保持屏幕常亮」开关会读写这两个成员。
+  @override
+  bool keepScreenOnEnabled = true;
+
+  @override
+  Future<void> setKeepScreenOnEnabled(bool enabled) async {
+    keepScreenOnEnabled = enabled;
+    notifyListeners();
+  }
+
+  @override
+  AudioQuality get audioQuality => AudioQuality.standard;
+
+  @override
+  bool get smartQualityEnabled => true;
+
+  @override
+  bool get autoPlayOnStartupEnabled => false;
+
+  @override
+  bool get autoPlayOnDeviceConnected => false;
+
+  @override
+  bool get loudnessEnabled => false;
+
+  @override
+  bool get isAudioEffectsSupported => false;
+
+  @override
+  bool get audioInterruptionEnabled => false;
+
+  @override
+  bool get autoResumeAfterInterruption => false;
+
+  @override
+  bool get addListeningTimeEnabled => false;
+
+  @override
+  bool get allowCellularPrecache => false;
+
+  @override
+  bool get isDesktopLyricsSupported => true;
+
+  @override
+  bool get desktopLyricsEnabled => false;
+
+  @override
+  bool get isBluetoothLyricsSupported => false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeTheme extends ChangeNotifier implements ThemeController {
+  _FakeTheme({this.carModeEnabled = false, this.isAutomotiveDevice = false});
+
+  @override
+  bool carModeEnabled;
+
+  @override
+  bool isAutomotiveDevice;
+
+  @override
+  double get fontScale => 1.0;
+
+  @override
+  Color get seedColor => const Color(0xFF5B6CF9);
+
+  @override
+  bool get backgroundEnabled => false;
+
+  @override
+  bool get landscapeEnabled => false;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeApi implements MusicApi {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}

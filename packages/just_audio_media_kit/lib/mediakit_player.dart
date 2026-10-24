@@ -1,0 +1,528 @@
+library just_audio_media_kit;
+
+import 'dart:async';
+
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
+import 'package:logging/logging.dart';
+import 'package:media_kit/media_kit.dart';
+import 'src/set_property.dart';
+import 'src/volume_scale.dart';
+
+/// An [AudioPlayerPlatform] which wraps `package:media_kit`'s [Player]
+class MediaKitPlayer extends AudioPlayerPlatform {
+  static const kErrorCode = 1;
+
+  // LOCAL PATCH (shiyin): just_audio 0.10.x 的 AudioPlayer 不公开其平台
+  // 实例（_platform/_platformValue 均私有，也没有 id getter），app 侧无法
+  // 经 just_audio 拿到本类实例。构造时登记入册、release 时摘除，桌面音效
+  // （setAudioEffectFilters）等 app 侧能力经在册实例触达 mpv。本仓 app
+  // 全程只有一个播放 AudioPlayer，单实例语义成立。
+  static final List<MediaKitPlayer> _activeInstances = <MediaKitPlayer>[];
+
+  /// 当前在册的 [MediaKitPlayer] 实例（无桌面播放器时为空列表）。
+  static List<MediaKitPlayer> get activeInstances =>
+      List<MediaKitPlayer>.unmodifiable(_activeInstances);
+
+  /// `package:media_kit`'s [Player]
+  late final Player _player;
+
+  /// The subscriptions that have to be disposed
+  late final List<StreamSubscription> _streamSubscriptions;
+
+  final _readyCompleter = Completer<void>();
+
+  /// Completes when the player is ready
+  Future<void> ready() => _readyCompleter.future;
+
+  static final _logger = Logger('MediaKitPlayer');
+
+  final _eventController = StreamController<PlaybackEventMessage>.broadcast();
+  final _dataController = StreamController<PlayerDataMessage>.broadcast();
+
+  ProcessingStateMessage _processingState = ProcessingStateMessage.idle;
+  Duration _bufferedPosition = Duration.zero;
+  Duration _position = Duration.zero;
+  Duration? _duration;
+  bool _playing = false;
+  bool _mediaOpened = false;
+  int? _errorCode;
+  String? _errorMessage;
+  Completer<Duration?>? _loadCompleter;
+
+  /// The index that's currently playing
+  int _currentIndex = 0;
+
+  /// [LoadRequest.initialPosition] or [seek] request before [Player.play] was called and/or finished loading.
+  Duration? _setPosition;
+
+  Media? get _currentMedia {
+    var medias = _player.state.playlist.medias;
+    if (medias.isEmpty) return null;
+    return medias[_player.state.playlist.index];
+  }
+
+  MediaKitPlayer(super.id) {
+    // LOCAL PATCH (shiyin): 登记入册（见 _activeInstances 注释）。
+    _activeInstances.add(this);
+    _player = Player(
+        configuration: PlayerConfiguration(
+      pitch: JustAudioMediaKit.pitch,
+      protocolWhitelist: JustAudioMediaKit.protocolWhitelist,
+      title: JustAudioMediaKit.title,
+      bufferSize: JustAudioMediaKit.bufferSize,
+      logLevel: JustAudioMediaKit.mpvLogLevel,
+      ready: () => _readyCompleter.complete(),
+    ));
+
+    if (JustAudioMediaKit.prefetchPlaylist) {
+      setProperty(_player, 'prefetch-playlist', 'yes');
+    }
+
+    // LOCAL PATCH: mpv 默认 volume-max=130。volume 为立方刻度，+6dB 仅需
+    // ≈126，默认已基本够用；抬到 400 仅作防御性余量（防 mpv 上游默认变更
+    // 或未来放宽 Dart 侧 +6dB 钳制）。失败静默（非 NativePlayer 平台 no-op）。
+    unawaited(setProperty(_player, 'volume-max', '400').catchError((_) {}));
+
+    _streamSubscriptions = [
+      _player.stream.duration.listen((duration) {
+        if (_currentMedia?.extras?['overrideDuration'] != null) return;
+
+        if (_setPosition != null && duration.inSeconds > 0) {
+          unawaited(_player.seek(_setPosition!));
+          _setPosition = null;
+        }
+        _updateDuration(duration);
+        _updatePlaybackEvent();
+      }),
+      _player.stream.position.listen((position) {
+        _position = position;
+        final start = _currentMedia?.start;
+        if (start != null) _position -= start;
+        if (_position < Duration.zero) _position = Duration.zero;
+        _updatePlaybackEvent();
+      }),
+      _player.stream.buffering.listen((isBuffering) {
+        final start = _currentMedia?.start;
+        if (!isBuffering && start != null && _bufferedPosition <= start) {
+          // Not ready yet, will be triggered by _player.stream.buffer
+          return;
+        }
+        if (_processingState == ProcessingStateMessage.loading) {
+          if (!isBuffering && _mediaOpened) {
+            _processingState = ProcessingStateMessage.ready;
+            _errorCode = null;
+            _errorMessage = null;
+            if (_loadCompleter?.isCompleted != true) {
+              _loadCompleter?.complete(_duration);
+            }
+          }
+        } else if ((_processingState != ProcessingStateMessage.completed ||
+                isBuffering) &&
+            // LOCAL PATCH (upstream bug, Pato05/just_audio_media_kit):
+            // error 流已把状态置为 idle+errorCode 后，迟到的
+            // buffering=false 不得把失败掩盖回 ready、也不得清掉错误码
+            // ——否则 load 已完成、play 是空操作、错误又消失，队列会
+            // 无声地冻死在这一首。错误态的复位只发生在下一次 load()。
+            _errorCode == null) {
+          _processingState = isBuffering
+              ? ProcessingStateMessage.buffering
+              : ProcessingStateMessage.ready;
+          if (_duration == null) {
+            _updateDuration(_player.state.duration);
+          }
+        }
+        _updatePlaybackEvent();
+      }),
+      _player.stream.buffer.listen((buffer) {
+        _bufferedPosition = buffer;
+        // Detect ready for clipping audio source
+        final start = _currentMedia?.start;
+        if (!_player.state.buffering &&
+            _mediaOpened &&
+            start != null &&
+            _bufferedPosition > start) {
+          _processingState = ProcessingStateMessage.ready;
+          if (_loadCompleter?.isCompleted != true) {
+            _loadCompleter?.complete(_duration);
+          }
+        }
+        _updatePlaybackEvent();
+      }),
+      _player.stream.volume.listen((volume) {
+        // mpv volume（立方刻度）回读 → just_audio 线性语义；不换算的话
+        // just_audio 内部音量状态会漂移（0.5 被回读成 0.79）。
+        _dataController
+            .add(PlayerDataMessage(volume: linearFromMpvVolume(volume)));
+      }),
+      _player.stream.completed.listen((completed) {
+        if (completed &&
+            // is at the end of the [Playlist]
+            _currentIndex == _player.state.playlist.medias.length - 1 &&
+            // is not looping (technically this shouldn't be fired if the player is looping)
+            _player.state.playlistMode == PlaylistMode.none) {
+          _processingState = ProcessingStateMessage.completed;
+          _bufferedPosition = _position = Duration.zero;
+          // LOCAL PATCH: EOF 后把 playing 的真话回写给 just_audio。
+          // 上层的 AudioPlayer.playing 只由 play()/pause() 与 PlayerDataMessage
+          // 驱动，本适配层此前从不回写 → 曲末 playing 恒为 true，而
+          // just_audio.play() 首行是 `if (playing) return;`：任何「曲末重新起播」
+          // 都会空转（UI 显示播放中却没有声音）。"改私有 _playing"修不了这条，
+          // 它只影响下面 load() 的 open(play:)，必须走这条真通道。
+          // 加 state.playing 守卫：eof 事件可能迟到于下一次 load/open（那时
+          // 新歌已在播），这种情况不能把 playing 打回 false。
+          // 本回写依赖 EOF 时 media_kit 的 isPlayingStateChangeAllowed 为 true
+          // （packages/media_kit real.dart：open(play:true)/play() 置 true，
+          // EOF 处理器同步置 state.playing=false 后才发 completed，故与
+          // pause/eof 事件顺序无关）。若自动切歌回归，先查该 flag 是否被置 false。
+          if (!_player.state.playing) {
+            _dataController.add(PlayerDataMessage(playing: false));
+          }
+          // 注意：私有的 _playing 不在此处置 false。它只表达「下一次 load()
+          // 该不该自动起播」（load → open(play: _playing)）。曲末用户并没有
+          // 按暂停，同曲重载/自动下一首理应照旧自动播；置 false 会让新开的
+          // 媒体停在暂停态，只能等后续 play() 兜底（历史回归即此）。
+        } else if (!completed &&
+            _processingState == ProcessingStateMessage.completed) {
+          // seek / 重新起播离开 completed：若不复位，上层 isPlaying 会因
+          // processingState==completed 恒为 false，UI 冻在暂停。
+          _processingState = ProcessingStateMessage.ready;
+        }
+        _errorCode = null;
+        _errorMessage = null;
+
+        _updatePlaybackEvent();
+      }),
+      _player.stream.error.listen((error) {
+        // LOCAL PATCH: completed 之后的错误只记日志，不回退成 idle+errorCode。
+        // 理由：eof 后偶发 ffmpeg/stream error 日志（连接清理等）若被抬成
+        // 致命错误，会 deactivate 平台、打断自动下一首；completed 后再出错
+        // 也不影响「本曲已播完、应切下一首」的产品语义。加载期/播放中途
+        // 的错误仍走下方原有路径（completeError / 错误态）。
+        if (_processingState == ProcessingStateMessage.completed) {
+          _logger.severe('ERROR OCCURRED (after completed, ignored): $error');
+          return;
+        }
+        final errorUri = RegExp(r'Failed to open (.*)\.').firstMatch(error)?[1];
+        if (errorUri == null || errorUri == _currentMedia?.uri) {
+          _processingState = ProcessingStateMessage.idle;
+          _errorCode = kErrorCode;
+          _errorMessage = error;
+          // LOCAL PATCH (upstream bug, Pato05/just_audio_media_kit):
+          // load() 在等 _loadCompleter，而它只有 buffering/buffer 监听器会
+          // 以"成功"完成——打不开的 URL（404/DNS 失败）永远没人 complete，
+          // 每次失败都要挂满上层 15s 超时才走重试/错误路径。这里补
+          // completeError，让 just_audio 的 setUrl/load 立刻抛
+          // PlatformException 并进入既有重试链。
+          if (_loadCompleter?.isCompleted != true) {
+            _loadCompleter?.completeError(
+              PlatformException(code: kErrorCode.toString(), message: error),
+            );
+          }
+          _updatePlaybackEvent();
+        }
+        _logger.severe('ERROR OCCURRED: $error');
+      }),
+      _player.stream.playlist.listen((playlist) {
+        if (_currentIndex != playlist.index) {
+          _bufferedPosition = _position = Duration.zero;
+          _currentIndex = playlist.index;
+        }
+        _duration = _currentMedia?.extras?['overrideDuration'];
+        _updatePlaybackEvent();
+      }),
+      _player.stream.playlistMode.listen((playlistMode) {
+        _dataController.add(
+            PlayerDataMessage(loopMode: _playlistModeToLoopMode(playlistMode)));
+      }),
+      _player.stream.pitch.listen((pitch) {
+        _dataController.add(PlayerDataMessage(pitch: pitch));
+      }),
+      _player.stream.rate.listen((rate) {
+        _dataController.add(PlayerDataMessage(speed: rate));
+      }),
+      _player.stream.log.listen((event) {
+        // ignore: avoid_print
+        print("MPV: [${event.level}] ${event.prefix}: ${event.text}");
+      }),
+    ];
+  }
+
+  void _updateDuration(Duration duration) {
+    final start = _currentMedia?.start;
+    final end = _currentMedia?.end;
+    if (end != null) duration = end;
+    if (start != null) duration -= start;
+    _duration = duration;
+  }
+
+  PlaylistMode _loopModeToPlaylistMode(LoopModeMessage loopMode) {
+    return switch (loopMode) {
+      LoopModeMessage.off => PlaylistMode.none,
+      LoopModeMessage.one => PlaylistMode.single,
+      LoopModeMessage.all => PlaylistMode.loop,
+    };
+  }
+
+  LoopModeMessage _playlistModeToLoopMode(PlaylistMode playlistMode) {
+    return switch (playlistMode) {
+      PlaylistMode.none => LoopModeMessage.off,
+      PlaylistMode.single => LoopModeMessage.one,
+      PlaylistMode.loop => LoopModeMessage.all,
+    };
+  }
+
+  @override
+  Stream<PlaybackEventMessage> get playbackEventMessageStream =>
+      _eventController.stream;
+
+  @override
+  Stream<PlayerDataMessage> get playerDataMessageStream =>
+      _dataController.stream;
+
+  /// Updates the playback event
+  void _updatePlaybackEvent() {
+    _eventController.add(PlaybackEventMessage(
+      processingState: _processingState,
+      updateTime: DateTime.now(),
+      updatePosition: _position,
+      bufferedPosition: _bufferedPosition,
+      duration: _duration,
+      icyMetadata: null,
+      currentIndex: _currentIndex,
+      androidAudioSessionId: null,
+      errorCode: _errorCode,
+      errorMessage: _errorMessage,
+    ));
+  }
+
+  @override
+  Future<LoadResponse> load(LoadRequest request) async {
+    _logger.finest('load(${request.toMap()})');
+    _mediaOpened = false;
+    _loadCompleter = Completer();
+    _currentIndex = request.initialIndex ?? 0;
+    _bufferedPosition = Duration.zero;
+    _position = Duration.zero;
+    // LOCAL PATCH (upstream bug, v2.1.0, Pato05/just_audio_media_kit):
+    // seek() 在 duration 未知时会把目标暂存到 _setPosition，等 duration 流
+    // 首次 >0 时再补跳。上游 load() 重置了 _position/_duration 等全部状态，
+    // 唯独不清 _setPosition——"加载中 seek → 立刻切歌"会把旧歌的 seek 目标
+    // 携带进新歌：新歌 duration 事件一到，duration 监听器就把旧目标 seek
+    // 应用到新歌上。这里在换源时清空暂存目标，根治跨歌残留。
+    _setPosition = null;
+    _duration = null;
+    _processingState = ProcessingStateMessage.loading;
+    _errorCode = null;
+    _errorMessage = null;
+    _updatePlaybackEvent();
+
+    if (request.audioSourceMessage is ConcatenatingAudioSourceMessage) {
+      final audioSource =
+          request.audioSourceMessage as ConcatenatingAudioSourceMessage;
+      final playable = Playlist(
+          audioSource.children.map(_convertAudioSourceIntoMediaKit).toList(),
+          index: _currentIndex);
+
+      await _player.open(playable, play: _playing);
+    } else {
+      final playable =
+          _convertAudioSourceIntoMediaKit(request.audioSourceMessage);
+      _logger.finest('playable is ${playable.toString()}');
+      await _player.open(playable, play: _playing);
+    }
+    _mediaOpened = true;
+
+    if (request.initialPosition != null) {
+      _setPosition = _position = request.initialPosition!;
+    }
+
+    _updatePlaybackEvent();
+    final duration = await _loadCompleter?.future;
+    return LoadResponse(duration: duration);
+  }
+
+  @override
+  Future<PlayResponse> play(PlayRequest request) async {
+    _playing = true;
+    if (_mediaOpened) {
+      await _player.play();
+    }
+    return PlayResponse();
+  }
+
+  @override
+  Future<PauseResponse> pause(PauseRequest request) async {
+    _playing = false;
+    if (_mediaOpened) {
+      await _player.pause();
+    }
+    return PauseResponse();
+  }
+
+  @override
+  Future<SetVolumeResponse> setVolume(SetVolumeRequest request) {
+    // LOCAL PATCH: just_audio 的 volume 是线性幅度（1.0=原幅度），而 mpv 的
+    // volume 属性是立方刻度（实际增益=(volume/100)³，见 mpv player/audio.c
+    // audio_get_gain）。直接 ×100 会把一切增益的 dB 值放大 3 倍（0.5→-18dB
+    // 而非 -6dB；2.0→+18dB 而非 +6dB），响度均衡/用户音量双双失真。
+    // 按立方根换算保证 just_audio 语义精确成立：2.0→≈126(+6dB)、0.5→≈79.4(-6dB)。
+    return _player
+        .setVolume(mpvVolumeFromLinear(request.volume))
+        .then((value) => SetVolumeResponse());
+  }
+
+  @override
+  Future<SetSpeedResponse> setSpeed(SetSpeedRequest request) {
+    return _player.setRate(request.speed).then((_) => SetSpeedResponse());
+  }
+
+  @override
+  Future<SetPitchResponse> setPitch(SetPitchRequest request) =>
+      _player.setPitch(request.pitch).then((_) => SetPitchResponse());
+
+  /// LOCAL PATCH (shiyin): 桌面音效 —— 把 EQ/环绕滤镜链透传给 media_kit
+  /// NativePlayer（与变速的 scaletempo 在 af 属性里合并，见 real.dart 的
+  /// _updateAudioFilters）。非 NativePlayer 平台静默 no-op。
+  Future<void> setAudioEffectFilters(List<String> filters) async {
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setExtraAudioFilters(filters);
+    }
+  }
+
+  @override
+  Future<SetLoopModeResponse> setLoopMode(SetLoopModeRequest request) async {
+    await _player.setPlaylistMode(_loopModeToPlaylistMode(request.loopMode));
+    return SetLoopModeResponse();
+  }
+
+  @override
+  Future<SetShuffleModeResponse> setShuffleMode(
+      SetShuffleModeRequest request) async {
+    bool shuffling = request.shuffleMode != ShuffleModeMessage.none;
+    await _player.setShuffle(shuffling);
+
+    _dataController.add(PlayerDataMessage(
+        shuffleMode:
+            shuffling ? ShuffleModeMessage.all : ShuffleModeMessage.none));
+    return SetShuffleModeResponse();
+  }
+
+  @override
+  Future<SeekResponse> seek(SeekRequest request) async {
+    _logger.finest('seek(${request.toMap()})');
+    if (request.index != null) {
+      await _player.jump(request.index!);
+      if (!_playing) await _player.pause();
+    }
+
+    final position = request.position;
+    if (position != null) {
+      _position = position;
+
+      final start = _currentMedia?.start;
+      var nativePosition = position;
+      if (start != null) nativePosition += start;
+      if (_player.state.duration.inSeconds > 0) {
+        await _player.seek(nativePosition);
+      } else {
+        _setPosition = nativePosition;
+      }
+    } else {
+      _position = Duration.zero;
+    }
+
+    // reset position on seek
+    // completed 后 seek 必须离开 completed 态（completed 流也可能不触发
+    // false，例如 duration 未知时只暂存 _setPosition）。
+    if (_processingState == ProcessingStateMessage.completed) {
+      _processingState = ProcessingStateMessage.ready;
+    }
+    _updatePlaybackEvent();
+    return SeekResponse();
+  }
+
+  @override
+  Future<ConcatenatingInsertAllResponse> concatenatingInsertAll(
+      ConcatenatingInsertAllRequest request) async {
+    // _logger.fine('concatenatingInsertAll(${request.toMap()})');
+    for (final source in request.children) {
+      await _player.add(_convertAudioSourceIntoMediaKit(source));
+
+      final length = _player.state.playlist.medias.length;
+
+      if (length == 0 || length == 1) continue;
+
+      if (request.index < (length - 1) && request.index >= 0) {
+        await _player.move(length, request.index);
+      }
+    }
+
+    return ConcatenatingInsertAllResponse();
+  }
+
+  @override
+  Future<ConcatenatingRemoveRangeResponse> concatenatingRemoveRange(
+      ConcatenatingRemoveRangeRequest request) async {
+    for (var i = request.startIndex; i < request.endIndex; i++) {
+      await _player.remove(request.startIndex);
+    }
+
+    return ConcatenatingRemoveRangeResponse();
+  }
+
+  @override
+  Future<ConcatenatingMoveResponse> concatenatingMove(
+      ConcatenatingMoveRequest request) {
+    return _player
+        .move(
+            request.currentIndex,
+            // not sure why, but apparently there's an underlying difference between just_audio's move implementation
+            // and media_kit, so let's fix it
+            request.currentIndex > request.newIndex
+                ? request.newIndex
+                : request.newIndex + 1)
+        .then((_) => ConcatenatingMoveResponse());
+  }
+
+  /// Release the resources used by this player.
+  Future<void> release() async {
+    _logger.info('releasing player resources');
+    // LOCAL PATCH (shiyin): 摘除在册登记（见 _activeInstances 注释）。
+    _activeInstances.remove(this);
+    _mediaOpened = false;
+    await _player.dispose();
+    // cancel all stream subscriptions
+    for (final StreamSubscription subscription in _streamSubscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _streamSubscriptions.clear();
+  }
+
+  /// Converts an [AudioSourceMessage] into a [Media] for playback
+  Media _convertAudioSourceIntoMediaKit(AudioSourceMessage audioSource) {
+    switch (audioSource) {
+      case final UriAudioSourceMessage uriSource:
+        return Media(uriSource.uri, httpHeaders: audioSource.headers);
+
+      // removed because it doesn't seem to be actually working.
+      // Related media-kit issue: https://github.com/media-kit/media-kit/issues/28
+      // case final SilenceAudioSourceMessage silenceSource:
+      //   // from https://github.com/bleonard252/just_audio_mpv/blob/main/lib/src/mpv_player.dart#L137
+      //   return Media(
+      //     'av://lavfi:anullsrc=d=${silenceSource.duration.inMilliseconds}ms',
+      //     extras: {'overrideDuration': silenceSource.duration},
+      //   );
+
+      case final ClippingAudioSourceMessage clippingSource:
+        return Media(clippingSource.child.uri,
+            start: clippingSource.start, end: clippingSource.end);
+
+      default:
+        throw UnsupportedError(
+            '${audioSource.runtimeType} is currently not supported');
+    }
+  }
+}

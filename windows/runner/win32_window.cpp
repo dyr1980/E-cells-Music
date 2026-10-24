@@ -1,0 +1,423 @@
+#include "win32_window.h"
+
+#include <dwmapi.h>
+#include <flutter_windows.h>
+
+#include "resource.h"
+
+namespace {
+
+/// Window attribute that enables dark mode window decorations.
+///
+/// Redefined in case the developer's machine has a Windows SDK older than
+/// version 10.0.22000.0.
+/// See: https://docs.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+
+constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+// 单实例互斥体/激活消息：与安装包 AppId 保持一致（installer/shiyin.iss），
+// 安装版与便携版共用同一名称（产品级全局只允许一个时音进程）。
+// 必须用 Local\ 前缀（按登录会话隔离；Global\ 会让多用户/RDP 互相顶掉）。
+constexpr const wchar_t kSingleInstanceMutexName[] =
+    L"Local\\ShiYinMusic.SingleInstance.{53E8B6D2-7C41-4F5A-9D6E-1A0B2C3D4E5F}";
+// main.cpp 与本文件用同一字符串 RegisterWindowMessage 即得同一消息 ID。
+constexpr const wchar_t kSingleInstanceActivateMessage[] =
+    L"ShiYinMusic.SingleInstance.Activate.{53E8B6D2-7C41-4F5A-9D6E-1A0B2C3D4E5F}";
+
+/// Registry key for app theme preference.
+///
+/// A value of 0 indicates apps should use dark mode. A non-zero or missing
+/// value indicates apps should use light mode.
+constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
+  L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
+
+// The number of Win32Window objects that currently exist.
+static int g_active_window_count = 0;
+
+// 窗口原生擦除底色：默认与浅色主题页面底色一致（白色），Dart 启动后按
+// 当前主题经 shiyin_music/window 通道同步（见 FlutterWindow::OnCreate）。
+static COLORREF g_erase_background_color = RGB(255, 255, 255);
+
+// 擦除差异快照：上一帧内容所在的客户区屏幕矩形。顶层窗口与 FLUTTERVIEW
+// 子窗口共用（子窗擦除通常先到，填充差异并推进快照后，顶层的擦除为空操作）。
+static RECT g_erase_snapshot_client = {0, 0, 0, 0};
+
+RECT ClientScreenRect(HWND hwnd) {
+  RECT rect;
+  GetClientRect(hwnd, &rect);
+  POINT origin = {0, 0};
+  ClientToScreen(hwnd, &origin);
+  OffsetRect(&rect, origin.x, origin.y);
+  return rect;
+}
+
+using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
+
+// Scale helper to convert logical scaler values to physical using passed in
+// scale factor
+int Scale(int source, double scale_factor) {
+  return static_cast<int>(source * scale_factor);
+}
+
+// Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
+// This API is only needed for PerMonitor V1 awareness mode.
+void EnableFullDpiSupportIfAvailable(HWND hwnd) {
+  HMODULE user32_module = LoadLibraryA("User32.dll");
+  if (!user32_module) {
+    return;
+  }
+  auto enable_non_client_dpi_scaling =
+      reinterpret_cast<EnableNonClientDpiScaling*>(
+          GetProcAddress(user32_module, "EnableNonClientDpiScaling"));
+  if (enable_non_client_dpi_scaling != nullptr) {
+    enable_non_client_dpi_scaling(hwnd);
+  }
+  FreeLibrary(user32_module);
+}
+
+}  // namespace
+
+// Manages the Win32Window's window class registration.
+class WindowClassRegistrar {
+ public:
+  ~WindowClassRegistrar() = default;
+
+  // Returns the singleton registrar instance.
+  static WindowClassRegistrar* GetInstance() {
+    if (!instance_) {
+      instance_ = new WindowClassRegistrar();
+    }
+    return instance_;
+  }
+
+  // Returns the name of the window class, registering the class if it hasn't
+  // previously been registered.
+  const wchar_t* GetWindowClass();
+
+  // Unregisters the window class. Should only be called if there are no
+  // instances of the window.
+  void UnregisterWindowClass();
+
+ private:
+  WindowClassRegistrar() = default;
+
+  static WindowClassRegistrar* instance_;
+
+  bool class_registered_ = false;
+};
+
+WindowClassRegistrar* WindowClassRegistrar::instance_ = nullptr;
+
+const wchar_t* WindowClassRegistrar::GetWindowClass() {
+  if (!class_registered_) {
+    WNDCLASS window_class{};
+    window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    window_class.lpszClassName = kWindowClassName;
+    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    window_class.cbClsExtra = 0;
+    window_class.cbWndExtra = 0;
+    window_class.hInstance = GetModuleHandle(nullptr);
+    window_class.hIcon =
+        LoadIcon(window_class.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
+    window_class.hbrBackground = 0;
+    window_class.lpszMenuName = nullptr;
+    window_class.lpfnWndProc = Win32Window::WndProc;
+    RegisterClass(&window_class);
+    class_registered_ = true;
+  }
+  return kWindowClassName;
+}
+
+void WindowClassRegistrar::UnregisterWindowClass() {
+  UnregisterClass(kWindowClassName, nullptr);
+  class_registered_ = false;
+}
+
+Win32Window::Win32Window() {
+  ++g_active_window_count;
+}
+
+Win32Window::~Win32Window() {
+  --g_active_window_count;
+  Destroy();
+}
+
+bool Win32Window::Create(const std::wstring& title,
+                         const Point& origin,
+                         const Size& size) {
+  Destroy();
+
+  const wchar_t* window_class =
+      WindowClassRegistrar::GetInstance()->GetWindowClass();
+
+  const POINT target_point = {static_cast<LONG>(origin.x),
+                              static_cast<LONG>(origin.y)};
+  HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
+  UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  double scale_factor = dpi / 96.0;
+
+  HWND window = CreateWindow(
+      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
+      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      nullptr, nullptr, GetModuleHandle(nullptr), this);
+
+  if (!window) {
+    return false;
+  }
+
+  UpdateTheme(window);
+
+  return OnCreate();
+}
+
+bool Win32Window::Show() {
+  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+}
+
+// static
+LRESULT CALLBACK Win32Window::WndProc(HWND const window,
+                                      UINT const message,
+                                      WPARAM const wparam,
+                                      LPARAM const lparam) noexcept {
+  if (message == WM_NCCREATE) {
+    auto window_struct = reinterpret_cast<CREATESTRUCT*>(lparam);
+    SetWindowLongPtr(window, GWLP_USERDATA,
+                     reinterpret_cast<LONG_PTR>(window_struct->lpCreateParams));
+
+    auto that = static_cast<Win32Window*>(window_struct->lpCreateParams);
+    EnableFullDpiSupportIfAvailable(window);
+    that->window_handle_ = window;
+  } else if (Win32Window* that = GetThisFromHandle(window)) {
+    return that->MessageHandler(window, message, wparam, lparam);
+  }
+
+  return DefWindowProc(window, message, wparam, lparam);
+}
+
+LRESULT
+Win32Window::MessageHandler(HWND hwnd,
+                            UINT const message,
+                            WPARAM const wparam,
+                            LPARAM const lparam) noexcept {
+  // 单实例激活（第二实例 PostMessage(HWND_BROADCAST)）：由已有实例自己
+  // 恢复并抢前台，比第二实例跨进程 SetForegroundWindow 更易绕过前台锁定。
+  const UINT activate_message = SingleInstanceActivateMessageId();
+  if (activate_message != 0 && message == activate_message) {
+    BringWindowToFront(hwnd);
+    return 0;
+  }
+  switch (message) {
+    case WM_DESTROY:
+      window_handle_ = nullptr;
+      Destroy();
+      if (quit_on_close_) {
+        PostQuitMessage(0);
+      }
+      return 0;
+
+    case WM_WINDOWPOSCHANGING:
+      // 尺寸变化前快照客户区（此消息到达时窗口仍是旧几何），供
+      // WM_ERASEBKGND 计算"新暴露区域"。不 return，继续默认处理。
+      SyncEraseSnapshotOnWindowPosChanging(
+          hwnd, reinterpret_cast<WINDOWPOS*>(lparam));
+      break;
+
+    case WM_ERASEBKGND:
+      // 窗口类无刷底（hbrBackground = 0）：最大化/缩放过渡期新暴露的边缘
+      // 在 Flutter 下一帧呈现前会闪黑。只填新暴露的差异带、保留旧画面
+      // （整幅重刷会把旧内容盖成底色，表现为整屏闪白/闪黑）。
+      FillExposedEdgesOnErase(hwnd, reinterpret_cast<HDC>(wparam));
+      return 1;
+
+    case WM_DPICHANGED: {
+      auto newRectSize = reinterpret_cast<RECT*>(lparam);
+      LONG newWidth = newRectSize->right - newRectSize->left;
+      LONG newHeight = newRectSize->bottom - newRectSize->top;
+
+      SetWindowPos(hwnd, nullptr, newRectSize->left, newRectSize->top, newWidth,
+                   newHeight, SWP_NOZORDER | SWP_NOACTIVATE);
+
+      return 0;
+    }
+    case WM_SIZE: {
+      RECT rect = GetClientArea();
+      if (child_content_ != nullptr) {
+        // Size and position the child window.
+        MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
+                   rect.bottom - rect.top, TRUE);
+      }
+      return 0;
+    }
+
+    case WM_ACTIVATE:
+      if (child_content_ != nullptr) {
+        SetFocus(child_content_);
+      }
+      return 0;
+
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+      UpdateTheme(hwnd);
+      return 0;
+  }
+
+  return DefWindowProc(window_handle_, message, wparam, lparam);
+}
+
+void Win32Window::Destroy() {
+  OnDestroy();
+
+  if (window_handle_) {
+    DestroyWindow(window_handle_);
+    window_handle_ = nullptr;
+  }
+  if (g_active_window_count == 0) {
+    WindowClassRegistrar::GetInstance()->UnregisterWindowClass();
+  }
+}
+
+Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
+  return reinterpret_cast<Win32Window*>(
+      GetWindowLongPtr(window, GWLP_USERDATA));
+}
+
+void Win32Window::SetChildContent(HWND content) {
+  child_content_ = content;
+  SetParent(content, window_handle_);
+  RECT frame = GetClientArea();
+
+  MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
+             frame.bottom - frame.top, true);
+
+  SetFocus(child_content_);
+}
+
+RECT Win32Window::GetClientArea() {
+  RECT frame;
+  GetClientRect(window_handle_, &frame);
+  return frame;
+}
+
+HWND Win32Window::GetHandle() {
+  return window_handle_;
+}
+
+UINT Win32Window::SingleInstanceActivateMessageId() {
+  static const UINT kId =
+      ::RegisterWindowMessageW(kSingleInstanceActivateMessage);
+  return kId;
+}
+
+const wchar_t* Win32Window::SingleInstanceMutexName() {
+  return kSingleInstanceMutexName;
+}
+
+void Win32Window::BringWindowToFront(HWND hwnd) {
+  if (hwnd == nullptr || !::IsWindow(hwnd)) {
+    return;
+  }
+  // 托盘隐藏（SW_HIDE）时 IsIconic 为 false，只判最小化会漏恢复：
+  // 最小化用 SW_RESTORE，其余（含隐藏态）用 SW_SHOW 覆盖。
+  if (::IsIconic(hwnd)) {
+    ::ShowWindowAsync(hwnd, SW_RESTORE);
+  } else {
+    ::ShowWindowAsync(hwnd, SW_SHOW);
+  }
+  // SetForegroundWindow 受前台锁定限制可能失败，退化为 TOP 置顶。
+  if (!::SetForegroundWindow(hwnd)) {
+    ::SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                   SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW);
+    ::BringWindowToTop(hwnd);
+  }
+}
+
+void Win32Window::SetQuitOnClose(bool quit_on_close) {
+  quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetEraseBackgroundColor(COLORREF color) {
+  g_erase_background_color = color;
+}
+
+void Win32Window::SyncEraseSnapshotOnWindowPosChanging(HWND hwnd,
+                                                       WINDOWPOS* pos) {
+  if (pos->flags & SWP_NOSIZE) {
+    if (pos->flags & SWP_NOMOVE) {
+      return;
+    }
+    // 纯移动：内容随窗口整体平移，不产生新暴露区域，快照随之平移，
+    // 保持"上一帧内容所在矩形"语义。
+    RECT window_rect;
+    GetWindowRect(hwnd, &window_rect);
+    OffsetRect(&g_erase_snapshot_client, pos->x - window_rect.left,
+               pos->y - window_rect.top);
+    return;
+  }
+  // 尺寸将变：记录变化前的客户区屏幕矩形。
+  g_erase_snapshot_client = ClientScreenRect(hwnd);
+}
+
+void Win32Window::FillExposedEdgesOnErase(HWND hwnd, HDC hdc) {
+  const RECT cur = ClientScreenRect(hwnd);
+  // 快照换算到当前客户区坐标系（擦除 DC 为客户区坐标）。
+  RECT prev = g_erase_snapshot_client;
+  OffsetRect(&prev, -cur.left, -cur.top);
+  const LONG cur_w = cur.right - cur.left;
+  const LONG cur_h = cur.bottom - cur.top;
+
+  // 顶/底整条横带 + 左/右竖带（纵向截到快照范围，避免重复填充四角），
+  // 四条带拼起来恰为"当前客户区 ∖ 快照"，覆盖移动 + 缩放任意组合下
+  // 新暴露的区域。窗口缩小时差异为空、全部不填，旧画面由 Flutter 重绘。
+  HBRUSH brush = CreateSolidBrush(g_erase_background_color);
+  RECT band;
+  if (prev.top > 0) {
+    band = {0, 0, cur_w, prev.top > cur_h ? cur_h : prev.top};
+    FillRect(hdc, &band, brush);
+  }
+  if (prev.bottom < cur_h) {
+    band = {0, prev.bottom < 0 ? 0 : prev.bottom, cur_w, cur_h};
+    FillRect(hdc, &band, brush);
+  }
+  const LONG v_top = prev.top < 0 ? 0 : prev.top;
+  const LONG v_bottom = prev.bottom > cur_h ? cur_h : prev.bottom;
+  if (v_bottom > v_top) {
+    if (prev.left > 0) {
+      band = {0, v_top, prev.left > cur_w ? cur_w : prev.left, v_bottom};
+      FillRect(hdc, &band, brush);
+    }
+    if (prev.right < cur_w) {
+      band = {prev.right < 0 ? 0 : prev.right, v_top, cur_w, v_bottom};
+      FillRect(hdc, &band, brush);
+    }
+  }
+  DeleteObject(brush);
+  g_erase_snapshot_client = cur;
+}
+
+bool Win32Window::OnCreate() {
+  // No-op; provided for subclasses.
+  return true;
+}
+
+void Win32Window::OnDestroy() {
+  // No-op; provided for subclasses.
+}
+
+void Win32Window::UpdateTheme(HWND const window) {
+  DWORD light_mode;
+  DWORD light_mode_size = sizeof(light_mode);
+  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
+                               kGetPreferredBrightnessRegValue,
+                               RRF_RT_REG_DWORD, nullptr, &light_mode,
+                               &light_mode_size);
+
+  if (result == ERROR_SUCCESS) {
+    BOOL enable_dark_mode = light_mode == 0;
+    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                          &enable_dark_mode, sizeof(enable_dark_mode));
+  }
+}

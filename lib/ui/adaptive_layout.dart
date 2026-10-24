@@ -1,0 +1,143 @@
+import 'package:flutter/material.dart';
+
+import 'form_factor.dart';
+
+/// 窗口宽度分级（逻辑像素），阈值与设计文档 §3 一致。
+enum WindowWidthClass { compact, medium, expanded, large, expandedDesktop }
+
+/// 自适应布局工具类。
+///
+/// 平板检测基于 Material Design 的 breakpoint：
+/// - 最小边 < 600dp → 手机
+/// - 最小边 ≥ 600dp → 平板
+///
+/// 手机横屏时最小边仍为宽度（一般 ≤ 430dp），不会被误判为平板。
+class AdaptiveLayout {
+  const AdaptiveLayout._();
+
+  /// 普通平板内容区域的最大宽度（已取消限制，保留常量供网格计算参考）。
+  static const double tabletMaxWidth = 800;
+
+  /// 超宽屏内容区域的最大宽度（已取消限制，保留常量供网格计算参考）。
+  static const double wideMaxWidth = 1200;
+
+  /// 横轨转网格的宽度起点（逻辑像素），与 widthClassFor 的 expanded 对齐。
+  static const double kGridStartWidth = 840;
+
+  /// 桌面形态且宽度达到网格起点（横轨转网格的唯一门控入口）。
+  static bool isDesktopGridWidth(double width) =>
+      isDesktopFormFactor && width >= kGridStartWidth;
+
+  /// 仅按宽度判定横轨是否转网格（与形态无关）。
+  ///
+  /// 桌面形态沿用 [isDesktopGridWidth]（语义一致），移动形态的平板分支
+  /// （触屏侧栏宽度及以上）用本入口把手机横轨升级为网格；桌面在此
+  /// 门控下的行为与 [isDesktopGridWidth] 完全一致。
+  static bool isGridWidth(double width) => width >= kGridStartWidth;
+
+  /// 移动形态触屏侧栏的宽度起点（逻辑像素）。
+  ///
+  /// 达到该宽度的移动形态窗口（平板横屏 / 大平板竖屏）把底部导航
+  /// 换成左侧触屏侧栏；与 [isTablet]（按最短边）不同，本断点按窗口
+  /// 宽度触发，保证窗口化/分屏时的实时切换。
+  static const double kTouchSidebarStartWidth = 720;
+
+  static bool isTouchSidebarWidth(double width) =>
+      width >= kTouchSidebarStartWidth;
+
+  /// 网格列数计算时为两侧内容预留的总边距。
+  static const double kGridHorizontalPadding = 32;
+
+  /// 是否为平板设备。
+  ///
+  /// 使用 [MediaQuery.sizeOf] 获取屏幕逻辑像素，
+  /// `shortestSide >= 600` 即判定为平板（Material Design 标准）。
+  static bool isTablet(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return size.shortestSide >= 600;
+  }
+
+  /// 不依赖 [BuildContext] 的平板判断。
+  ///
+  /// 直接从 [PlatformDispatcher] 读取屏幕物理尺寸换算为逻辑像素。
+  /// 适用于 [State.dispose] 等 context 已失效、无法调用
+  /// [MediaQuery.sizeOf] 的场景，否则会触发
+  /// `Null check operator used on a null value` 异常。
+  static bool isTabletByPlatform() {
+    final views = WidgetsBinding.instance.platformDispatcher.views;
+    if (views.isEmpty) return false;
+    final view = views.first;
+    final physical = view.physicalSize;
+    if (physical.isEmpty) return false;
+    final size = physical / view.devicePixelRatio;
+    return size.shortestSide >= 600;
+  }
+
+  /// 是否为超宽屏（宽高比 ≥ 2.5 或宽度 ≥ 1600dp）。
+  static bool isUltraWide(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return size.width >= 1600 || (size.height > 0 && size.width / size.height >= 2.5);
+  }
+
+  /// 根据屏幕宽度计算内容区域的最大宽度。
+  ///
+  /// 已取消最大宽度限制，所有屏幕均铺满显示。
+  static double contentMaxWidthFor(BuildContext context) {
+    return double.infinity;
+  }
+
+  /// 根据屏幕宽度计算网格列数。
+  ///
+  /// 适用于歌单、专辑等网格布局。
+  static int gridColumnsFor(BuildContext context, {double minItemWidth = 160}) {
+    final maxWidth = contentMaxWidthFor(context);
+    final effectiveWidth = maxWidth == double.infinity
+        ? MediaQuery.sizeOf(context).width
+        : maxWidth;
+    return (effectiveWidth / minItemWidth).floor().clamp(2, 8);
+  }
+
+  /// 按宽度返回窗口分级（PC 适配断点体系入口）。
+  static WindowWidthClass widthClassFor(double width) {
+    if (width >= 1600) return WindowWidthClass.expandedDesktop;
+    if (width >= 1200) return WindowWidthClass.large;
+    if (width >= 840) return WindowWidthClass.expanded;
+    if (width >= 600) return WindowWidthClass.medium;
+    return WindowWidthClass.compact;
+  }
+
+  /// 按宽度与最小项宽计算网格列数，结果夹在 [min]–[max]。
+  ///
+  /// 宽度低于网格起点（840，即 expanded 断点）时直接返回 [min]。
+  /// 32 为两侧内容边距预留。
+  static int gridColumnsForWidth(
+    double width, {
+    double minItemWidth = 200,
+    int min = 2,
+    int max = 6,
+  }) {
+    assert(minItemWidth > 0, 'minItemWidth 必须为正数');
+    assert(min <= max, 'min 不能大于 max');
+    if (width < kGridStartWidth) return min;
+    return ((width - kGridHorizontalPadding) ~/ minItemWidth).clamp(min, max);
+  }
+}
+
+/// 自适应内容内边距。
+///
+/// 已取消最大宽度限制，所有屏幕均铺满显示。
+class AdaptiveContentPadding extends StatelessWidget {
+  const AdaptiveContentPadding({
+    super.key,
+    required this.child,
+    this.maxWidth,
+  });
+
+  final Widget child;
+  final double? maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return child;
+  }
+}

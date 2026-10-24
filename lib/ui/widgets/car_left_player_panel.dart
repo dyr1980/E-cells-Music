@@ -1,0 +1,587 @@
+import 'dart:async' show unawaited;
+
+import 'package:flutter/material.dart';
+import '../../config/app_config.dart';
+import '../../controllers/auth_controller.dart';
+import '../../controllers/player_controller.dart';
+import '../../models/music_models.dart';
+import '../player/player_route.dart';
+import '../player/song_tap_handler.dart';
+import 'artwork.dart';
+import 'marquee_text.dart';
+import 'song_action_sheets.dart' show toggleLikeWithFeedback;
+import 'toast.dart';
+
+class CarLeftPlayerPanel extends StatelessWidget {
+  const CarLeftPlayerPanel({
+    super.key,
+    required this.player,
+    required this.auth,
+  });
+
+  final PlayerController player;
+  final AuthController auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final isSmallScreen = size.width < 960;
+    final panelWidth = isSmallScreen ? 320.0 : 380.0;
+    final panelPadding = isSmallScreen ? 14.0 : 20.0;
+
+    if (size.height < 150) {
+      return SizedBox(width: panelWidth);
+    }
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final height = MediaQuery.sizeOf(context).height;
+    final sysPadding = MediaQuery.paddingOf(context);
+    final availableHeight = height - sysPadding.top - sysPadding.bottom;
+
+    final isShortScreen = height < 500;
+    final verticalPadding = isShortScreen ? 8.0 : 20.0;
+    final bottomGap = isShortScreen ? 10.0 : 32.0;
+    final controlsHeight = isShortScreen ? 68.0 : 80.0;
+
+    final artworkSizeSubtractor = isShortScreen ? 250.0 : 340.0;
+    final artworkSize = (availableHeight - artworkSizeSubtractor).clamp(80.0, 280.0);
+
+    final gapSize = isShortScreen ? 10.0 : 20.0;
+    final titleGap = isShortScreen ? 14.0 : 24.0;
+    final progressGap = isShortScreen ? 16.0 : 28.0;
+
+    final buttonMinWidth = isSmallScreen ? 42.0 : 52.0;
+    final playBtnSize = isSmallScreen ? 56.0 : 64.0;
+    final playIconSize = isSmallScreen ? 32.0 : 40.0;
+
+    return AnimatedBuilder(
+      animation: player,
+      builder: (context, _) {
+        final song = player.currentSong;
+        if (song == null) {
+          return Container(
+            width: panelWidth,
+            color: colorScheme.surfaceContainer,
+            padding: EdgeInsets.fromLTRB(
+              panelPadding,
+              sysPadding.top + verticalPadding,
+              panelPadding,
+              sysPadding.bottom + verticalPadding,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(context, colorScheme),
+                const Expanded(
+                  child: Center(
+                    child: Text(
+                      '暂无播放歌曲',
+                      style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final isPreparing = player.isPreparing;
+        final playbackMode = player.playbackMode;
+
+        return Container(
+          width: panelWidth,
+          padding: EdgeInsets.fromLTRB(
+            panelPadding,
+            sysPadding.top + verticalPadding,
+            panelPadding,
+            sysPadding.bottom + verticalPadding,
+          ),
+          color: colorScheme.surfaceContainer,
+          child: ClipRect(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(context, colorScheme),
+                const Spacer(),
+                Center(
+                  child: GestureDetector(
+                    onTap: () => PlayerPageRoute.open(
+                      context,
+                      player: player,
+                      auth: auth,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: .10)
+                              : Colors.white.withValues(alpha: .92),
+                          width: 1.1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: isDark ? .22 : .10),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Artwork(
+                          url: song.coverUrl,
+                          size: artworkSize,
+                          borderRadius: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: gapSize),
+                Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => PlayerPageRoute.open(
+                          context,
+                          player: player,
+                          auth: auth,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            MarqueeText.text(
+                              song.title,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 18,
+                                  ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    AnimatedBuilder(
+                      animation: auth,
+                      builder: (context, _) {
+                        final liked = auth.isLiked(song);
+                        // 车机远距离触控：收藏按钮加大，保证 >=48dp 触控目标。
+                        final favBtnSize = isSmallScreen ? 52.0 : 60.0;
+                        final favIconSize = isSmallScreen ? 30.0 : 34.0;
+                        return Container(
+                          width: favBtnSize,
+                          height: favBtnSize,
+                          decoration: BoxDecoration(
+                            color: liked
+                                ? Colors.redAccent.withValues(alpha: .12)
+                                : (isDark
+                                    ? Colors.white.withValues(alpha: .08)
+                                    : colorScheme.surfaceContainerHighest.withValues(alpha: .9)),
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            onPressed: song.source == SongSource.kugou
+                                ? () => toggleLikeWithFeedback(auth, song)
+                                : null,
+                            icon: Icon(
+                              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              color: liked ? Colors.redAccent : colorScheme.onSurfaceVariant,
+                              size: favIconSize,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+                SizedBox(height: titleGap),
+                _CarProgressBar(player: player, colorScheme: colorScheme, isDark: isDark),
+                SizedBox(height: progressGap),
+                Container(
+                  height: controlsHeight,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: .06)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(40),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: .10)
+                          : Colors.white.withValues(alpha: .92),
+                      width: 1.1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? .18 : .06),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(minWidth: buttonMinWidth, minHeight: buttonMinWidth),
+                        icon: Icon(
+                          _getPlaybackModeIcon(playbackMode),
+                          size: isSmallScreen ? 24 : 28,
+                          color: colorScheme.onSurface,
+                        ),
+                        onPressed: player.cyclePlaybackMode,
+                      ),
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(minWidth: buttonMinWidth, minHeight: buttonMinWidth),
+                        icon: Icon(
+                          Icons.skip_previous_rounded,
+                          size: isSmallScreen ? 30 : 36,
+                          color: colorScheme.onSurface,
+                        ),
+                        onPressed: isPreparing ? null : player.previous,
+                      ),
+                      Container(
+                        width: playBtnSize,
+                        height: playBtnSize,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: colorScheme.primary.withValues(alpha: .35),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: AnimatedBuilder(
+                            animation: player,
+                            builder: (_, _) => Icon(
+                              player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                              color: colorScheme.onPrimary,
+                              size: playIconSize,
+                            ),
+                          ),
+                          onPressed: isPreparing ? null : player.togglePlay,
+                        ),
+                      ),
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(minWidth: buttonMinWidth, minHeight: buttonMinWidth),
+                        icon: Icon(
+                          Icons.skip_next_rounded,
+                          size: isSmallScreen ? 30 : 36,
+                          color: colorScheme.onSurface,
+                        ),
+                        onPressed: isPreparing ? null : player.next,
+                      ),
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(minWidth: buttonMinWidth, minHeight: buttonMinWidth),
+                        icon: Icon(
+                          Icons.queue_music_rounded,
+                          size: isSmallScreen ? 24 : 28,
+                          color: colorScheme.onSurface,
+                        ),
+                        onPressed: () => _showQueue(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                SizedBox(height: bottomGap),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: isDark ? .18 : .10),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            Icons.music_note_rounded,
+            color: colorScheme.primary,
+            size: 16,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          AppConfig.appName,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                color: colorScheme.onSurface,
+              ),
+        ),
+      ],
+    );
+  }
+
+  IconData _getPlaybackModeIcon(PlaybackMode mode) {
+    return switch (mode) {
+      PlaybackMode.playlistLoop => Icons.repeat_rounded,
+      PlaybackMode.shuffle => Icons.shuffle_rounded,
+      PlaybackMode.singleLoop => Icons.repeat_one_rounded,
+    };
+  }
+
+  void _showQueue(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 头部（队列数 + 清空按钮可用态）同样监听 player，
+                // 面板打开期间队列变化时保持刷新（与桌面端 DesktopQueuePanel 一致）。
+                AnimatedBuilder(
+                  animation: player,
+                  builder: (context, _) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Text(
+                            '播放队列',
+                            style: Theme.of(sheetContext)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w900),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${player.queue.length} 首',
+                            style: Theme.of(sheetContext)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: player.queue.length > 1
+                                ? () {
+                                    final current = player.currentSong;
+                                    if (current == null) return;
+                                    Navigator.of(sheetContext).pop();
+                                    // 与移动端队列语义对齐：静默换队不重载，驾驶时不断流
+                                    unawaited(player.replaceQueue([current]));
+                                    Toast.success('已清空播放队列');
+                                  }
+                                : null,
+                            child: Text(
+                              '清空',
+                              style: TextStyle(color: colorScheme.error),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                Flexible(
+                  child: AnimatedBuilder(
+                    animation: player,
+                    builder: (context, _) {
+                      if (player.queue.isEmpty) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 32),
+                          child: Center(
+                            child: Text(
+                              '播放队列为空',
+                              style: Theme.of(sheetContext)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: player.queue.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 2),
+                        itemBuilder: (context, index) {
+                          final song = player.queue[index];
+                          final active =
+                              isSameSong(player.currentSong, song);
+                          return ListTile(
+                            selected: active,
+                            leading: Artwork(url: song.coverUrl, size: 40, borderRadius: 8),
+                            title: active
+                                ? MarqueeText.text(
+                                    song.title,
+                                    style: TextStyle(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  )
+                                : Text(
+                                    song.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                            subtitle: Text(song.artist),
+                            trailing: active
+                                ? Icon(
+                                    player.isPlaying ? Icons.equalizer_rounded : Icons.pause_rounded,
+                                    color: colorScheme.primary,
+                                  )
+                                : null,
+                            onTap: () {
+                              // 点当前行只关面板不重头播（与队列面板一致）
+                              if (isSameSong(player.currentSong, song)) {
+                                Navigator.of(sheetContext).pop();
+                                return;
+                              }
+                              Navigator.of(sheetContext).pop();
+                              player.playSong(song, queue: player.queue);
+                            },
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatDuration(Duration d) {
+    if (d == Duration.zero) return '00:00';
+    final minutes = d.inMinutes.toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+}
+
+class _CarProgressBar extends StatelessWidget {
+  const _CarProgressBar({
+    required this.player,
+    required this.colorScheme,
+    required this.isDark,
+  });
+
+  final PlayerController player;
+  final ColorScheme colorScheme;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Duration>(
+      valueListenable: player.positionListenable,
+      builder: (context, _, _) {
+        final duration = player.duration;
+        final position = player.smoothPosition;
+        final max = duration.inMilliseconds <= 0
+            ? 1.0
+            : duration.inMilliseconds.toDouble();
+        final value = position.inMilliseconds
+            .clamp(0, max.toInt())
+            .toDouble();
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(
+                  enabledThumbRadius: 5,
+                ),
+                overlayShape: const RoundSliderOverlayShape(
+                  overlayRadius: 10,
+                ),
+                activeTrackColor: colorScheme.primary,
+                inactiveTrackColor: isDark
+                    ? Colors.white.withValues(alpha: 0.16)
+                    : Colors.black.withValues(alpha: 0.08),
+                thumbColor: colorScheme.primary,
+              ),
+              child: Slider(
+                value: value,
+                max: max,
+                onChanged: (val) =>
+                    player.previewSeek(Duration(milliseconds: val.round())),
+                onChangeEnd: (val) async {
+                  try {
+                    await player.seek(
+                      Duration(milliseconds: val.round()),
+                    );
+                  } catch (_) {
+                    Toast.error('定位失败，请重试');
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  CarLeftPlayerPanel._formatDuration(position),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  CarLeftPlayerPanel._formatDuration(duration),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}

@@ -1,0 +1,72 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.flutter
+.flutter_tool_state
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Rust build artifacts
+rust/target/
+
+# Android native library build output
+android/app/src/main/jniLibs/
+
+.ace-tool/
+.opencode/
+.superpowers/
+.zcode/
+.workbuddy/
+
+# Release signing
+android/app/release.keystore
+key.properties
+# 2026-09-07 确认为废弃旧钥匙（与实际签名用的 android/app/release.keystore
+# 指纹不同、全仓零引用）并移出索引；git 历史中仍存在，勿再引入
+/buildKey.keystore
+
+# 本地运行日志（开发期在仓库根目录生成）
+/lyrics_log.txt
+
+# 本地评审记录（不入库）
+/KNOWN_ISSUES.md

@@ -1,0 +1,199 @@
+import 'dart:ui';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shiyin_music/ui/desktop/desktop_window.dart';
+
+void main() {
+  group('DesktopWindowGeometry.clampToVisibleAreas', () {
+    test('窗口与第一个可见区域相交 → 原样返回', () {
+      const geometry = DesktopWindowGeometry(
+        left: 100,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      expect(result, geometry);
+    });
+
+    test('窗口与第二个可见区域相交 → 原样返回', () {
+      const geometry = DesktopWindowGeometry(
+        left: 2000,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [
+          Rect.fromLTWH(0, 0, 1920, 1080),
+          Rect.fromLTWH(1920, 0, 1920, 1080),
+        ],
+      );
+      expect(result, geometry);
+    });
+
+    test('窗口完全在屏幕右侧外 → 钳制进第一个区域（右/下各留 80px）', () {
+      const geometry = DesktopWindowGeometry(
+        left: 5000,
+        top: 5000,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      // left = 0 + max(0, 1920 - 80 - 1280) = 560
+      // top  = 0 + max(0, 1080 - 80 - 800) = 200
+      expect(
+        result,
+        const DesktopWindowGeometry(
+          left: 560,
+          top: 200,
+          width: 1280,
+          height: 800,
+        ),
+      );
+    });
+
+    test('窗口完全在屏幕左侧外（负坐标）→ 钳制进第一个区域', () {
+      const geometry = DesktopWindowGeometry(
+        left: -5000,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      // left = 0 + max(0, 1920 - 80 - 1280) = 560
+      // top  = 0 + max(0, 1080 - 80 - 800) = 200
+      expect(
+        result,
+        const DesktopWindowGeometry(
+          left: 560,
+          top: 200,
+          width: 1280,
+          height: 800,
+        ),
+      );
+    });
+
+    test('窗口比区域（减 80px）更宽/更高 → 贴第一个区域左上角并钳制尺寸', () {
+      const geometry = DesktopWindowGeometry(
+        left: -3000,
+        top: -3000,
+        width: 1900,
+        height: 1200,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      // max(0, 1920 - 80 - 1900) = 0、max(0, 1080 - 80 - 1200) = 0；
+      // 尺寸钳到所有可见区域的包围盒：宽 1900 ≤ 1920 不变，高 1200 → 1080。
+      expect(
+        result,
+        const DesktopWindowGeometry(
+          left: 0,
+          top: 0,
+          width: 1900,
+          height: 1080,
+        ),
+      );
+    });
+
+    test('默认 1280x800 落在 1366x768 小屏 → 高度钳到 768', () {
+      // 记忆/默认尺寸超过屏幕时必须缩窗，否则底部播放条永远探出屏幕。
+      const geometry = DesktopWindowGeometry(
+        left: 0,
+        top: 0,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1366, 768)],
+      );
+      expect(result.width, 1280);
+      expect(result.height, 768);
+    });
+
+    test('多个区域互不相交 → 落到第一个区域', () {
+      const geometry = DesktopWindowGeometry(
+        left: 5000,
+        top: 5000,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [
+          Rect.fromLTWH(0, 0, 1920, 1080),
+          Rect.fromLTWH(1920, 0, 1920, 1080),
+        ],
+      );
+      // 相对第一个区域：left = 560、top = 200
+      expect(
+        result,
+        const DesktopWindowGeometry(
+          left: 560,
+          top: 200,
+          width: 1280,
+          height: 800,
+        ),
+      );
+    });
+
+    test('可见区域列表为空 → 原样返回', () {
+      const geometry = DesktopWindowGeometry(
+        left: 5000,
+        top: 5000,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [],
+      );
+      expect(result, geometry);
+    });
+
+    test('与区域仅数像素交集（拔副屏/DPI 换算贴边残余）→ 钳回可见区', () {
+      // 窗口右沿只探进主屏 5px：旧语义（任意交集即通过）会留下一个几乎
+      // 不可见、无法拖回的窗口。
+      const geometry = DesktopWindowGeometry(
+        left: 1915,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      expect(result.left, 560);
+      expect(result.top, 200);
+    });
+
+    test('交集足量（≥80px 见方）→ 原样返回', () {
+      // 右沿探进 120px（≥80），正常部分可见窗口不受影响。
+      const geometry = DesktopWindowGeometry(
+        left: 1800,
+        top: 100,
+        width: 1280,
+        height: 800,
+      );
+      final result = DesktopWindowGeometry.clampToVisibleAreas(
+        geometry,
+        const [Rect.fromLTWH(0, 0, 1920, 1080)],
+      );
+      expect(result, geometry);
+    });
+  });
+}

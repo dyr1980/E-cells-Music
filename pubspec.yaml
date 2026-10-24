@@ -1,0 +1,119 @@
+name: shiyin_music
+description: "the best music application"
+publish_to: 'none'
+version: 3.0.13+3000013
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  audio_service: ^0.18.18
+  # desktop_system_media.dart 子类化平台实现时需要请求类型
+  # （ConfigureRequest/SetMediaItemRequest 等）。
+  audio_service_platform_interface: ^0.1.3
+  audio_session: ^0.2.3
+  http: ^1.5.0
+  just_audio: ^0.10.4
+  # 桌面音频后端（Linux/Windows）：just_audio 官方不出桌面平台实现，
+  # 统一用社区 media_kit(libmpv) 适配，在 main.dart 的 Linux/Windows 分支
+  # 注册（Windows 原生 WinRT 后端已随 2026-09 迁移移除，记录见
+  # docs/superpowers/specs/2026-09-11-windows-media-kit-migration-design.md）。
+  # Linux 运行期依赖系统 libmpv2（发行版维护）；Windows 二进制由
+  # media_kit_libs_windows_audio 构建期提供（见下）。
+  # 本地 vendored 副本（packages/just_audio_media_kit），含八处补丁：
+  # 1) load() 时清空 _setPosition（上游 2.1.0 跨歌残留 seek 目标 bug）；
+  # 2) 新增线性→mpv 立方刻度的 setVolume/回读换算（mpv volume 实际
+  #    增益=(volume/100)³，直接 ×100 会把增益 dB 放大 3 倍），另构造时
+  #    设 volume-max=400 仅作防御性余量；
+  # 3) error 流对 _loadCompleter completeError（上游 load 失败无人
+  #    complete，死链路要挂满上层 15s 超时才报错）；
+  # 4) buffering 流不再把 idle 错误态掩盖回 ready / 清错误码（失败被
+  #    伪装成已就绪，队列无声冻结在当前歌）；
+  # 5) EOF 后把 playing 真话回写 just_audio（PlayerDataMessage），
+  #    just_audio.play() 首行 if(playing) return 才不会把曲末重新起播
+  #    整体短路；注意别改成只改私有 _playing，那只影响 open(play:)；
+  # 6) completed 之后的 error 只记日志，不回退 idle（否则平台被
+  #    deactivate，在途的下一首 load 会被打断）；
+  # 7) completed 流的 false 分支 / seek 让 processingState 离开 completed，
+  #    且 _position 只在真 completed 时清零（否则 seek 目标被自己清零）；
+  # 8) 新增静态实例登记表（构造登记入 _activeInstances、release 摘除，
+  #    供 app 侧触达 just_audio 不公开的平台实例）+ setAudioEffectFilters
+  #    透传（桌面音效 EQ/环绕滤镜链，与变速 scaletempo 在 media_kit 侧
+  #    合并写 af，见 media_kit 补丁）；
+  # 升级上游版本时八处都需确认是否已包含/需重新移植。
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_linux: ^1.2.1
+  # Windows libmpv 二进制（audio-only 构建，libmpv-2.dll 约 15MB）：构建期
+  # CMake 从 media-kit/libmpv-win32-audio-build 归档（2023-09-24，MD5 校验）
+  # 下载；来源仓库 2024-10 已归档、无升级路径，决策记录见
+  # docs/superpowers/specs/2026-09-11-windows-media-kit-migration-design.md。
+  media_kit_libs_windows_audio: ^1.0.9
+  # Linux MPRIS 系统媒体集成：audio_service 的 Linux 平台实现，
+  # 依赖后自动接管 AudioService.init（媒体键/GNOME/KDE 媒体控件）。
+  # 0.2.1 稳定版不支持相对 Seek（平台接口无对应方法），可接受。
+  audio_service_mpris: ^0.2.1
+  # Windows SMTC 系统媒体集成（音量浮层/媒体键/锁屏）：audio_service 的
+  # Windows 平台实现，与 MPRIS 同构，依赖后自动接管 AudioService.init，
+  # 无需手动接线（未选 smtc_windows：其 uuid ^4 与 system_tray 的 uuid ^3 冲突）。
+  audio_service_win: ^0.0.3
+  # 更新包 sha256 完整性校验（对照 Release 附带的 checksums.txt）。
+  crypto: ^3.0.7
+  shared_preferences: ^2.5.3
+  url_launcher: ^6.3.2
+  window_manager: ^0.4.3
+  system_tray: ^2.0.3
+  desktop_multi_window: ^0.2.0
+  dio: ^5.7.0
+  path_provider: ^2.1.5
+  screen_retriever: ^0.2.2
+  image_picker: ^1.1.2
+  file_picker: ^11.0.2
+  flutter_lyric: ^3.0.7
+  flutter_rust_bridge: 2.12.0
+  lpinyin: ^2.0.3
+  connectivity_plus: ^7.3.1
+  local_notifier: ^0.1.6
+  launch_at_startup: ^0.3.1
+  flutter_svg: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+dependency_overrides:
+  # 本地 vendored 副本（packages/window_manager），勿直接换回 pub.dev 版本：
+  # windows/runner 下两处关键补丁——
+  # 1) 全局静态 MethodChannel 改为实例成员 channel_：desktop_multi_window
+  #    子窗二次注册插件时，上游全局 channel 会被覆盖/析构置空，导致主窗
+  #    窗口事件（几何保存/关闭拦截）全部失效；
+  # 2) SetSkipTaskbar/SetProgressBar 的 taskbar_ 懒初始化 + 空 HWND 防护
+  #    + 析构 Release()（~WindowManager 中释放 COM 接口防泄漏）。
+  # 升级 window_manager 时必须把这两处补丁重新移植。
+  window_manager:
+    path: packages/window_manager
+  # 见上方依赖注释：本地最小补丁副本。
+  just_audio_media_kit:
+    path: packages/just_audio_media_kit
+  # 本地 vendored 副本（packages/media_kit），修复 Flutter 调试模式 Hot Restart 致命崩溃：
+  # 上游在 non-execmem-restricted（如 Windows）下使用 InitializerNativeCallable 向 libmpv 注册
+  # NativeCallable 回调。Hot Restart ('R') 销毁根 Isolate 时 Dart VM 删除该回调，但 libmpv
+  # 后台线程仍在进程中运行，一旦触发唤醒回调即引发 Dart VM 致命 abort：
+  #   "Callback invoked after it has been deleted" (runtime_entry.cc: 5143)。
+  # 补丁：
+  # 1) !kReleaseMode（调试/性能测试模式）强制回退至 media_kit 原生具备的 InitializerIsolate
+  #    （通过 Isolate.spawn + mpv_wait_event 轮询，不向 libmpv 注册任何 Dart 原生回调函数指针）；
+  # 2) NativeReferenceHolder 热重启清理旧句柄发送 'quit' 之前主动置空 mpv_set_wakeup_callback。
+  # 3) real.dart: af 属性统一组装（scaletempo + 音效链），新增 setExtraAudioFilters 公开 API。
+  media_kit:
+    path: packages/media_kit
+
+flutter:
+  uses-material-design: true
+  assets:
+    - update.md
+    - lib/assets/logo.png
+    - lib/assets/logo_line.svg
+    - lib/assets/app_icon.ico
