@@ -5,30 +5,30 @@ import 'package:shiyin_music/services/desktop_system_integration.dart';
 void main() {
   group('formatDesktopWindowTitle（窗口标题纯函数）', () {
     test('无播放时回落应用名', () {
-      expect(formatDesktopWindowTitle(), '时音');
-      expect(formatDesktopWindowTitle(songTitle: null, artist: null), '时音');
-      expect(formatDesktopWindowTitle(songTitle: '  ', artist: '歌手'), '时音');
+      expect(formatDesktopWindowTitle(), '易格音乐');
+      expect(formatDesktopWindowTitle(songTitle: null, artist: null), '易格音乐');
+      expect(formatDesktopWindowTitle(songTitle: '  ', artist: '歌手'), '易格音乐');
     });
 
-    test('歌名 - 歌手 - 时音', () {
+    test('歌名 - 歌手 - 易格音乐', () {
       expect(
         formatDesktopWindowTitle(songTitle: '晴天', artist: '周杰伦'),
-        '晴天 - 周杰伦 - 时音',
+        '晴天 - 周杰伦 - 易格音乐',
       );
     });
 
     test('无歌手时省略歌手段', () {
-      expect(formatDesktopWindowTitle(songTitle: '晴天', artist: ''), '晴天 - 时音');
+      expect(formatDesktopWindowTitle(songTitle: '晴天', artist: ''), '晴天 - 易格音乐');
       expect(
         formatDesktopWindowTitle(songTitle: '晴天', artist: '  '),
-        '晴天 - 时音',
+        '晴天 - 易格音乐',
       );
     });
 
     test('歌名首尾空白被裁剪', () {
       expect(
         formatDesktopWindowTitle(songTitle: ' 晴天 ', artist: ' 周杰伦 '),
-        '晴天 - 周杰伦 - 时音',
+        '晴天 - 周杰伦 - 易格音乐',
       );
     });
 
@@ -182,7 +182,7 @@ void main() {
 
     test('attach 立即同步标题；无播放回落应用名', () {
       final binder = buildBinder()..attach(source);
-      expect(titles, ['时音']);
+      expect(titles, ['易格音乐']);
       binder.detach();
     });
 
@@ -192,7 +192,7 @@ void main() {
         ..title = '晴天'
         ..artist = '周杰伦';
       source.notifyListeners();
-      expect(titles, ['时音', '晴天 - 周杰伦 - 时音']);
+      expect(titles, ['易格音乐', '晴天 - 周杰伦 - 易格音乐']);
       binder.detach();
     });
 
@@ -201,7 +201,7 @@ void main() {
         ..title = '晴天'
         ..artist = '周杰伦';
       final binder = buildBinder()..attach(source);
-      expect(titles, ['晴天 - 周杰伦 - 时音']);
+      expect(titles, ['晴天 - 周杰伦 - 易格音乐']);
       source.notifyListeners();
       source.notifyListeners();
       expect(titles, hasLength(1));
@@ -213,7 +213,7 @@ void main() {
       binder.detach();
       source.title = '晴天';
       source.notifyListeners();
-      expect(titles, ['时音']);
+      expect(titles, ['易格音乐']);
     });
 
     test('重复 attach 旧监听被替换，不产生双写', () {
@@ -221,7 +221,7 @@ void main() {
       binder.attach(source);
       source.title = '晴天';
       source.notifyListeners();
-      expect(titles, ['时音', '晴天 - 时音']);
+      expect(titles, ['易格音乐', '晴天 - 易格音乐']);
       binder.detach();
       binder.detach(); // 幂等
     });

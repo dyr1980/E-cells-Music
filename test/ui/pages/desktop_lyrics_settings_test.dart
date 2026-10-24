@@ -218,7 +218,7 @@ void main() {
       expect(find.text('效果预览'), findsOneWidget);
 
       // 桌面默认双行：预览同时显示两行。
-      expect(find.text('时音 听我想听'), findsWidgets);
+      expect(find.text('易格音乐 懂你的每一首热爱'), findsWidgets);
       expect(find.text('让音乐更自由'), findsWidgets);
       expect(find.byType(LyricsKaraokeLine), findsNWidgets(2));
 
@@ -227,7 +227,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Single line preview shows only current line
-      expect(find.text('时音 听我想听'), findsWidgets);
+      expect(find.text('易格音乐 懂你的每一首热爱'), findsWidgets);
       expect(find.byType(LyricsKaraokeLine), findsOneWidget);
       expect(find.text('让音乐更自由'), findsNothing);
     });

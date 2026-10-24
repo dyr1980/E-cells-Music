@@ -307,7 +307,7 @@ mixin _PlayerEffects on _PlayerControllerBase {
         await player.setAudioEffectFilters(filters);
       }
     } catch (error) {
-      debugPrint('[时音][audio-effects] Desktop filters failed: $error');
+      debugPrint('[易格][audio-effects] Desktop filters failed: $error');
     }
   }
 

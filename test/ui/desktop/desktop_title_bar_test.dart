@@ -11,7 +11,7 @@ void main() {
         .setMockMethodCallHandler(const MethodChannel('window_manager'), null);
   });
 
-  testWidgets('renders logo and title 时音', (tester) async {
+  testWidgets('renders logo and title 易格音乐', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(
@@ -20,7 +20,7 @@ void main() {
       ),
     );
 
-    expect(find.text('时音'), findsOneWidget);
+    expect(find.text('易格音乐'), findsOneWidget);
     expect(
       find.byWidgetPredicate(
         (w) =>

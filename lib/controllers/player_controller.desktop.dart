@@ -152,7 +152,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     if (enabled) {
       final hasPermission = await checkDesktopLyricsPermission();
       if (!hasPermission) {
-        debugPrint('[时音][桌面歌词] 开启失败：checkPermission=false');
+        debugPrint('[易格][桌面歌词] 开启失败：checkPermission=false');
         desktopLyricsEnabled = false;
         await prefs.setBool(_desktopLyricsEnabledSettingKey, false);
         notifyListeners();
@@ -211,7 +211,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       }
       final shown = await _androidLyric.show();
       if (!shown) {
-        debugPrint('[时音][桌面歌词] 悬浮窗启动失败（权限被撤或服务启动被拒）');
+        debugPrint('[易格][桌面歌词] 悬浮窗启动失败（权限被撤或服务启动被拒）');
         return;
       }
       // 原生 onCreate 会从自己的 prefs 恢复设置，这里补推是首帧保险
@@ -235,7 +235,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
     );
     if (!shown) {
       debugPrint(
-        '[时音][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限',
+        '[易格][桌面歌词] 悬浮窗创建失败：检查 desktop_multi_window/window_manager 插件注册与窗口权限',
       );
     } else {
       unawaited(_desktopLyrics.updateSettings(desktopLyricsSettings));
@@ -394,7 +394,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       _desktopLyricsSettingsVersion,
     );
     debugPrint(
-      '[时音][桌面歌词] 设置已保存 opacity=${settings.opacity} '
+      '[易格][桌面歌词] 设置已保存 opacity=${settings.opacity} '
       'fontSize=${settings.fontSize}',
     );
     notifyListeners();
@@ -415,7 +415,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       _androidLyricSettingsVersion,
     );
     debugPrint(
-      '[时音][桌面歌词] Android 设置已保存 fontSize=${settings.fontSize} '
+      '[易格][桌面歌词] Android 设置已保存 fontSize=${settings.fontSize} '
       'themeMode=${settings.themeMode}',
     );
     notifyListeners();
@@ -458,7 +458,7 @@ mixin _PlayerDesktop on _PlayerControllerBase {
       case 'lyricOffsetReset':
         unawaited(resetLyricOffset());
       default:
-        debugPrint('[时音][player] 未知桌面歌词播控指令: $action');
+        debugPrint('[易格][player] 未知桌面歌词播控指令: $action');
     }
   }
 

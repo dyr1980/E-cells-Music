@@ -30,7 +30,7 @@ val rustAbis: List<String> = buildList {
 }
 
 android {
-    namespace = "shiyin.famlife.top"
+    namespace = "com.muye.ecells.music"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -41,8 +41,9 @@ android {
 
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "shiyin.famlife.top"
+        // 易格音乐沿用 1.x 的包名（原 Vue+GeckoView 版本同包名，因签名
+        // 不同，覆盖安装需先卸载旧版）。
+        applicationId = "com.muye.ecells.music"
         // You may update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // 车载歌词依赖 SuperLyricApi 3.4 声明 minSdk 26，原 flutter.minSdkVersion(24) 会在 Manifest 合并失败
@@ -125,6 +126,9 @@ dependencies {
     implementation("com.github.HChenX:SuperLyricApi:3.4") {
         isChanging = true
     }
+    // Android 12+ 系统启动屏 + API 26-31 兼容层（易格音乐同款启动画面：
+    // 彩色背景 + 应用图标，样式见 res/values/styles.xml 的 LaunchTheme）。
+    implementation("androidx.core:core-splashscreen:1.2.0")
 }
 
 flutter {

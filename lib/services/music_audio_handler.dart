@@ -62,7 +62,7 @@ class _ProxyRoute {
   return (
     channelId:
         isCar ? 'shiyin_music.playback_car' : 'shiyin_music.playback_phone',
-    channelName: isCar ? '时音 车机播放控制' : '时音 播放控制',
+    channelName: isCar ? '易格音乐 车机播放控制' : '易格音乐 播放控制',
   );
 }
 

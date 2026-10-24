@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ============================================
-echo   时音 (Shiyin) - APK 构建工具
+echo   易格音乐 (E-Cells Music) - APK 构建工具
 echo ============================================
 echo.
 

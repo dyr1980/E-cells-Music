@@ -21,7 +21,7 @@ class DesktopWindow {
 
   static const Size kMinSize = Size(960, 600);
   static const Size kDefaultSize = Size(1280, 800);
-  static const String kWindowTitle = '时音';
+  static const String kWindowTitle = '易格音乐';
 
   /// 初始化窗口：恢复上次几何 → 应用最小尺寸 → 显示窗口。
   /// 必须在 runApp 之前 await 调用。
@@ -38,7 +38,7 @@ class DesktopWindow {
           const options = WindowOptions(
             size: Size(420, 860),
             minimumSize: Size(360, 520),
-            title: '时音 (移动端调试)',
+            title: '易格音乐 (移动端调试)',
             titleBarStyle: TitleBarStyle.normal,
           );
           await windowManager.waitUntilReadyToShow(options, () async {
@@ -254,7 +254,7 @@ class DesktopWindow {
   static bool maximizedPreferred(SharedPreferences prefs) =>
       prefs.getBool(kMaximizedPrefKey) ?? false;
 
-  /// 主窗原生配置通道（runner 侧注册，见 windows/runner/flutter_window.cpp）。
+  /// 主窗原生配置通道（历史：Windows runner 侧注册；v2.0.0 起仅安卓端）。
   static const MethodChannel _windowChannel = MethodChannel(
     'shiyin_music/window',
   );

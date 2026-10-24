@@ -195,7 +195,7 @@ class PlayerController extends _PlayerControllerBase
         if (isPreparing || errorMessage == null || _tailSkipExhausted) return;
         final song = currentSong;
         if (song == null) return;
-        debugPrint('[时音][player] 网络已恢复，自动重播: ${song.title}');
+        debugPrint('[易格][player] 网络已恢复，自动重播: ${song.title}');
         unawaited(playSong(song, isRetry: true));
       },
     );

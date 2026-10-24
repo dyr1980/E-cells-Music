@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 /// 动机：线上「曲末不跳下一首」「通知按钮失灵」这类用户侧偶发问题，此前
 /// 诊断输出只进 logcat（debugPrint），进程一退现场全无，事后无法取证。
 /// main() 里调用 [install] 接管 `debugPrint` 后，全 app 现有诊断通道
-/// （`[shiyin][next]` / `[SYNOTIF]` / `[时音][player]` / AudioHandler 代理
+/// （`[ecells][next]` / `[SYNOTIF]` / `[易格][player]` / AudioHandler 代理
 /// 错误）零改动同步落一份到文件。
 ///
 /// - 文件位置与下载目录同源（Android 取 app 专属外部存储——文件管理器

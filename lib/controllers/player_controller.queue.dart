@@ -113,7 +113,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
     try {
       await seek(Duration.zero);
     } catch (error) {
-      debugPrint('[时音][player] 回零失败: $error');
+      debugPrint('[易格][player] 回零失败: $error');
       errorMessage = '定位失败，请重试';
       notifyListeners();
     }
@@ -178,7 +178,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
 
       // 2. 蜂窝门控：未放行时不下载音频，只预取歌词
       if (!isAudioPrecacheAllowed) {
-        debugPrint('[时音][player] 蜂窝网络跳过音频预缓存: ${song.title}');
+        debugPrint('[易格][player] 蜂窝网络跳过音频预缓存: ${song.title}');
         return;
       }
 
@@ -198,7 +198,7 @@ mixin _PlayerQueue on _PlayerControllerBase {
         );
       }
     } catch (e) {
-      debugPrint('[时音][player] 预缓存失败静默忽略: ${song.title} ($e)');
+      debugPrint('[易格][player] 预缓存失败静默忽略: ${song.title} ($e)');
     } finally {
       _isPrecaching = false;
     }

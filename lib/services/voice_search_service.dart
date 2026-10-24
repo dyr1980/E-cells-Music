@@ -39,7 +39,7 @@ class VoiceSearchService {
         // 原生端未注册（非 Android 平台/引擎未就绪）时静默忽略。
         if (e is MissingPluginException) return null;
         if (kDebugMode) {
-          debugPrint('[时音][语音点歌] ready 调用失败: $e');
+          debugPrint('[易格][语音点歌] ready 调用失败: $e');
         }
         return null;
       });

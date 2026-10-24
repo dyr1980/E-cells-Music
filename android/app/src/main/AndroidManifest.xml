@@ -19,7 +19,7 @@
              通知渠道，防止 audio_service 在车机上以 IMPORTANCE_LOW 预建渠道导致
              MIN 静默配置失效（渠道重要性创建后无法程序化下调）。 -->
         <application
-            android:label="时音"
+            android:label="易格音乐"
             android:name=".MusicApplication"
             android:allowBackup="false"
             android:usesCleartextTraffic="true"

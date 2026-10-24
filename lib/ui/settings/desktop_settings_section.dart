@@ -157,7 +157,7 @@ class _AutoStartSwitchState extends State<AutoStartSwitch> {
       icon: Icons.rocket_launch_rounded,
       iconColor: const Color(0xFF3949AB),
       title: '开机自启',
-      subtitle: '登录系统时自动启动时音',
+      subtitle: '登录系统时自动启动易格音乐',
       value: _enabled,
       onChanged: (value) => unawaited(_onChanged(value)),
     );

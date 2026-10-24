@@ -26,8 +26,8 @@ class AboutSettingsSection extends StatelessWidget {
               iconColor: const Color(0xFF607D8B),
               title: '关于',
               subtitle: AppUpdateService.isSupportedPlatform
-                  ? '版本、更新日志与检查更新'
-                  : '版本与更新日志',
+                  ? '版本信息与检查更新'
+                  : '版本信息',
               onTap: () => Navigator.of(
                 context,
               ).push(MaterialPageRoute(builder: (_) => AboutPage(api: api))),

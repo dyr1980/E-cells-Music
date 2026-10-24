@@ -284,7 +284,7 @@ class HomeBrandHeader extends StatelessWidget {
         width: size,
         height: size,
         colorFilter: ColorFilter.mode(lineColor, BlendMode.srcIn),
-        semanticsLabel: '时音',
+        semanticsLabel: '易格音乐',
         placeholderBuilder: (_) => Icon(
           Icons.music_note_rounded,
           size: size,

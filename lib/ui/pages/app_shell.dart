@@ -908,7 +908,7 @@ class AppShortcutScope extends StatelessWidget {
                 // 仅日志吞掉，避免未处理异步异常上报
                 unawaited(
                   player.seek(target).catchError((Object error) {
-                    debugPrint('[时音][shortcut] seek 失败已忽略: $error');
+                    debugPrint('[易格][shortcut] seek 失败已忽略: $error');
                   }),
                 );
               }

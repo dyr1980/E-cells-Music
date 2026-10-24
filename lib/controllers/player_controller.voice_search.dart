@@ -56,13 +56,13 @@ mixin _PlayerVoiceSearch on _PlayerControllerBase {
       // 2. 非控制指令：搜索播放（与易格同规模，一次取 100 条）。
       final songs = await _api.searchSongs(query.trim(), page: 1, pageSize: 100);
       if (songs.isEmpty) {
-        debugPrint('[时音][语音点歌] 无搜索结果: "$query"');
+        debugPrint('[易格][语音点歌] 无搜索结果: "$query"');
         return;
       }
 
       if (voiceSearchMode == 'first') {
         // 仅播首曲：不替换当前队列，插到当前曲目之后，播完继续原列表
-        // （易格同语义；时音无队列命名 API，易格的"语音搜索: query"
+        // （易格同语义；上游无队列命名 API，易格的"语音搜索: query"
         // 队列标题无对应物，舍弃）。
         final newQueue = List<Song>.of(queue);
         // currentIndex 源自 queue（≤length-1），+1 后必在 [0, length] 内。
@@ -74,11 +74,11 @@ mixin _PlayerVoiceSearch on _PlayerControllerBase {
         await playSong(songs.first, queue: songs);
       }
       debugPrint(
-        '[时音][语音点歌] 已播放: "${songs.first.title}" '
+        '[易格][语音点歌] 已播放: "${songs.first.title}" '
         '(mode=$voiceSearchMode, results=${songs.length})',
       );
     } catch (e) {
-      debugPrint('[时音][语音点歌] 失败: $e');
+      debugPrint('[易格][语音点歌] 失败: $e');
     }
   }
 }

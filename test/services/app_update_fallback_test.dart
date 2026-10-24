@@ -9,10 +9,10 @@ import 'package:shiyin_music/services/app_update_service.dart';
 void main() {
   group('pickUpdateAssetUrl', () {
     final assets = <(String, String)>[
-      ('shiyin-v2.5.2-impeller-arm64.apk', 'https://dl/impeller.apk'),
-      ('shiyin-v2.5.2-skia-arm64.apk', 'https://dl/skia.apk'),
-      ('shiyin-v2.5.2-windows-x64-portable.zip', 'https://dl/portable.zip'),
-      ('shiyin-v2.5.2-windows-x64-setup.exe', 'https://dl/setup.exe'),
+      ('e-cells-music-v2.5.2-impeller-arm64.apk', 'https://dl/impeller.apk'),
+      ('e-cells-music-v2.5.2-skia-arm64.apk', 'https://dl/skia.apk'),
+      ('e-cells-music-v2.5.2-windows-x64-portable.zip', 'https://dl/portable.zip'),
+      ('e-cells-music-v2.5.2-windows-x64-setup.exe', 'https://dl/setup.exe'),
     ];
 
     test('Windows 便携版优先取 -portable.zip', () {
@@ -64,9 +64,9 @@ void main() {
 
     test('Android 按渲染器 + ABI 精确选 apk（三变体 Release）', () {
       final triAssets = <(String, String)>[
-        ('shiyin-v3.0.2-impeller-arm64.apk', 'https://dl/impeller-arm64.apk'),
-        ('shiyin-v3.0.2-skia-arm64.apk', 'https://dl/skia-arm64.apk'),
-        ('shiyin-v3.0.2-skia-arm32.apk', 'https://dl/skia-arm32.apk'),
+        ('e-cells-music-v3.0.2-impeller-arm64.apk', 'https://dl/impeller-arm64.apk'),
+        ('e-cells-music-v3.0.2-skia-arm64.apk', 'https://dl/skia-arm64.apk'),
+        ('e-cells-music-v3.0.2-skia-arm32.apk', 'https://dl/skia-arm32.apk'),
       ];
       // 64 位默认变体。
       expect(
@@ -87,8 +87,8 @@ void main() {
 
     test('Android 老 Release 无本 ABI 附件时逐级放宽', () {
       final legacyAssets = <(String, String)>[
-        ('shiyin-v3.0.1-impeller-arm64.apk', 'https://dl/old-impeller.apk'),
-        ('shiyin-v3.0.1-skia-arm64.apk', 'https://dl/old-skia.apk'),
+        ('e-cells-music-v3.0.1-impeller-arm64.apk', 'https://dl/old-impeller.apk'),
+        ('e-cells-music-v3.0.1-skia-arm64.apk', 'https://dl/old-skia.apk'),
       ];
       // v3.0.2 前只发过 arm64：32 位客户端按渲染器回退（历史上不存在
       // 32 位正式用户，可接受）。
@@ -99,10 +99,43 @@ void main() {
       // ABI 附件存在但渲染段缺失：按 ABI 匹配。
       expect(
         pickUpdateAssetUrl(const [
-          ('shiyin-v9.0.0-arm32.apk', 'https://dl/arm32.apk'),
-          ('shiyin-v9.0.0-arm64.apk', 'https://dl/arm64.apk'),
+          ('e-cells-music-v9.0.0-arm32.apk', 'https://dl/arm32.apk'),
+          ('e-cells-music-v9.0.0-arm64.apk', 'https://dl/arm64.apk'),
         ], renderer: 'skia', abi: 'arm32'),
         'https://dl/arm32.apk',
+      );
+    });
+
+    test('Android ABI 别名（NDK 名）附件可命中（易格 1.x 命名习惯）', () {
+      const aliasAssets = <(String, String)>[
+        ('e-cells-music-arm64-v8a-2.0.0.apk', 'https://dl/alias-arm64.apk'),
+        ('e-cells-music-armeabi-v7a-2.0.0.apk', 'https://dl/alias-arm32.apk'),
+      ];
+      // 渲染段缺失：按 ABI 别名选包，arm64 客户端不得误拿 arm32 包。
+      expect(
+        pickUpdateAssetUrl(aliasAssets, renderer: 'impeller', abi: 'arm64'),
+        'https://dl/alias-arm64.apk',
+      );
+      // 32 位老车机：按 armeabi-v7a 别名命中，且不误吞 arm64-v8a 包。
+      expect(
+        pickUpdateAssetUrl(aliasAssets, renderer: 'skia', abi: 'arm32'),
+        'https://dl/alias-arm32.apk',
+      );
+    });
+
+    test('Android 混合附件时「渲染器+ABI」精确匹配优先于别名包', () {
+      const mixed = <(String, String)>[
+        ('e-cells-music-v2.0.0-impeller-arm64.apk', 'https://dl/impeller.apk'),
+        ('e-cells-music-v2.0.0-skia-arm64.apk', 'https://dl/skia.apk'),
+        ('e-cells-music-arm64-v8a-v2.0.0.apk', 'https://dl/alias.apk'),
+      ];
+      expect(
+        pickUpdateAssetUrl(mixed, renderer: 'impeller', abi: 'arm64'),
+        'https://dl/impeller.apk',
+      );
+      expect(
+        pickUpdateAssetUrl(mixed, renderer: 'skia', abi: 'arm64'),
+        'https://dl/skia.apk',
       );
     });
 
@@ -124,7 +157,7 @@ void main() {
 
 ---
 
-**完整变更**：https://github.com/bamboostrip/shiyin-music/compare/v3.0.1...v3.0.2
+**完整变更**：https://github.com/bamboostrip/E-cells-Music/compare/v3.0.1...v3.0.2
 
 ## 📥 下载
 
@@ -132,8 +165,8 @@ void main() {
 
 | 产物 | 说明 |
 |------|------|
-| `shiyin-v3.0.2-impeller-arm64.apk` | Android 64 位 · 默认渲染 |
-| `shiyin-v3.0.2-skia-arm32.apk` | Android 32 位 · 老车机 |
+| `e-cells-music-v3.0.2-impeller-arm64.apk` | Android 64 位 · 默认渲染 |
+| `e-cells-music-v3.0.2-skia-arm32.apk` | Android 32 位 · 老车机 |
 ''';
       final stripped = stripReleaseDownloadSection(body);
       expect(stripped, contains('平板形态'));
@@ -196,14 +229,14 @@ void main() {
       'tag_name': 'v2.5.2',
       'body': '修复若干问题',
       'html_url':
-          'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
+          'https://github.com/bamboostrip/E-cells-Music/releases/tag/v2.5.2',
       'assets': [
         {
-          'name': 'shiyin-v2.5.2-windows-x64-portable.zip',
+          'name': 'e-cells-music-v2.5.2-windows-x64-portable.zip',
           'browser_download_url': 'https://dl/portable.zip',
         },
         {
-          'name': 'shiyin-v2.5.2-windows-x64-setup.exe',
+          'name': 'e-cells-music-v2.5.2-windows-x64-setup.exe',
           'browser_download_url': 'https://dl/setup.exe',
         },
       ],
@@ -240,15 +273,15 @@ void main() {
       const feed = '''
 <?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Release notes from shiyin-music</title>
+  <title>Release notes from E-cells-Music</title>
   <entry>
     <id>tag:github.com,2008:Repository/1/v2.5.2</id>
-    <link rel="alternate" type="text/html" href="https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2"/>
+    <link rel="alternate" type="text/html" href="https://github.com/bamboostrip/E-cells-Music/releases/tag/v2.5.2"/>
     <title>v2.5.2</title>
     <content type="html">&lt;h2&gt;更新内容&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;修复&lt;/li&gt;&lt;/ul&gt;</content>
   </entry>
   <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.1"/>
+    <link rel="alternate" type="text/html" href="https://github.com/bamboostrip/E-cells-Music/releases/tag/v2.5.1"/>
     <title>v2.5.1</title>
     <content type="html">&lt;h2&gt;旧版本&lt;/h2&gt;</content>
   </entry>
@@ -260,7 +293,7 @@ void main() {
       expect(tag, 'v2.5.2');
       expect(
         link,
-        'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
+        'https://github.com/bamboostrip/E-cells-Music/releases/tag/v2.5.2',
       );
       expect(
         content,
@@ -366,17 +399,17 @@ void main() {
     test('提取 download 直链，忽略源码包并去重', () {
       const html = '''
 <ul>
-  <li><a href="/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-portable.zip"><span class="text-bold">portable.zip</span></a><span>28.5 MB</span></li>
-  <li><a href="/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-setup.exe">setup.exe</a></li>
-  <li><a href="/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-impeller-arm64.apk">apk</a></li>
-  <li><a href="/bamboostrip/shiyin-music/archive/refs/tags/v2.5.2.zip">Source code (zip)</a></li>
+  <li><a href="/bamboostrip/E-cells-Music/releases/download/v2.5.2/e-cells-music-v2.5.2-windows-x64-portable.zip"><span class="text-bold">portable.zip</span></a><span>28.5 MB</span></li>
+  <li><a href="/bamboostrip/E-cells-Music/releases/download/v2.5.2/e-cells-music-v2.5.2-windows-x64-setup.exe">setup.exe</a></li>
+  <li><a href="/bamboostrip/E-cells-Music/releases/download/v2.5.2/e-cells-music-v2.5.2-impeller-arm64.apk">apk</a></li>
+  <li><a href="/bamboostrip/E-cells-Music/archive/refs/tags/v2.5.2.zip">Source code (zip)</a></li>
 </ul>
 ''';
       final assets = parseExpandedAssetLinks(html);
       expect(assets.length, 3);
       expect(assets[0], (
-        'shiyin-v2.5.2-windows-x64-portable.zip',
-        'https://github.com/bamboostrip/shiyin-music/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-portable.zip',
+        'e-cells-music-v2.5.2-windows-x64-portable.zip',
+        'https://github.com/bamboostrip/E-cells-Music/releases/download/v2.5.2/e-cells-music-v2.5.2-windows-x64-portable.zip',
       ));
       expect(assets.any((a) => a.$1.endsWith('-setup.exe')), isTrue);
       expect(assets.any((a) => a.$1.endsWith('.apk')), isTrue);
@@ -385,7 +418,7 @@ void main() {
 
     test('选中后可按 Windows 规则复用', () {
       const html =
-          '<a href="/o/r/releases/download/v2.5.2/shiyin-v2.5.2-windows-x64-setup.exe">x</a>';
+          '<a href="/o/r/releases/download/v2.5.2/e-cells-music-v2.5.2-windows-x64-setup.exe">x</a>';
       final picked = pickUpdateAssetUrl(
         parseExpandedAssetLinks(html),
         windowsAssetKind: kWindowsAssetSetup,
@@ -399,7 +432,7 @@ void main() {
     test('从 302 Location 提取 tag', () {
       expect(
         extractTagFromLocation(
-          'https://github.com/bamboostrip/shiyin-music/releases/tag/v2.5.2',
+          'https://github.com/bamboostrip/E-cells-Music/releases/tag/v2.5.2',
         ),
         'v2.5.2',
       );
@@ -419,7 +452,7 @@ void main() {
 
   group('detectWindowsInstalledBuild', () {
     test('同目录存在 flag 判为安装版', () async {
-      final dir = await Directory.systemTemp.createTemp('shiyin_flag_test');
+      final dir = await Directory.systemTemp.createTemp('ecells_flag_test');
       addTearDown(() => dir.delete(recursive: true));
       final exe = File('${dir.path}${Platform.pathSeparator}ShiYinMusic.exe');
       await exe.writeAsBytes([0x4D, 0x5A]);

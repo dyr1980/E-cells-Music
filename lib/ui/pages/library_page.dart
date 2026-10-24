@@ -652,7 +652,7 @@ class _UserProfileHeader extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        profile?.nickname ?? '时音 用户',
+                        profile?.nickname ?? '易格音乐 用户',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleMedium?.copyWith(

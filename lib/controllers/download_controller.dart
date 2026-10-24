@@ -225,7 +225,7 @@ class DownloadController extends ChangeNotifier {
       }
     }
     if (dropped > 0) {
-      debugPrint('[时音][download] 索引裁剪 $dropped 条坏数据并回写');
+      debugPrint('[易格][download] 索引裁剪 $dropped 条坏数据并回写');
       await _persistDownloads();
     }
   }
@@ -278,7 +278,7 @@ class DownloadController extends ChangeNotifier {
       }
     }
     if (dropped > 0) {
-      debugPrint('[时音][download] 播放缓存裁剪 $dropped 条坏数据并回写');
+      debugPrint('[易格][download] 播放缓存裁剪 $dropped 条坏数据并回写');
       await _persistPlayCache();
     }
   }
@@ -604,7 +604,7 @@ class DownloadController extends ChangeNotifier {
         },
       );
       if (gen != _generation || _disposed) {
-        debugPrint('[时音][download] 代际过期，丢弃传输结果: ${song.title}');
+        debugPrint('[易格][download] 代际过期，丢弃传输结果: ${song.title}');
         return;
       }
       _downloads[hash] = DownloadEntry(
@@ -870,7 +870,7 @@ class DownloadController extends ChangeNotifier {
       }
     }
     debugPrint(
-      '[时音][download] 对账完成：搬移/采用 ${rewrites.length} 条，'
+      '[易格][download] 对账完成：搬移/采用 ${rewrites.length} 条，'
       '移除 $removed 条',
     );
     notifyListeners();
@@ -911,7 +911,7 @@ class DownloadController extends ChangeNotifier {
       try {
         await source.copy(retryPath);
       } catch (error) {
-        debugPrint('[时音][download] 历史目录文件跨盘复制失败（保留原路径）: $error');
+        debugPrint('[易格][download] 历史目录文件跨盘复制失败（保留原路径）: $error');
         try {
           final partial = File(retryPath);
           if (partial.existsSync()) await partial.delete();
@@ -924,11 +924,11 @@ class DownloadController extends ChangeNotifier {
         await source.delete();
       } catch (error) {
         // 删源失败：目标已完整落地，索引指向新路径，源残留由用户清理。
-        debugPrint('[时音][download] 跨盘搬移删源失败（源残留）: $error');
+        debugPrint('[易格][download] 跨盘搬移删源失败（源残留）: $error');
       }
       return retryPath;
     } catch (error) {
-      debugPrint('[时音][download] 历史目录文件搬移失败（保留原路径）: $error');
+      debugPrint('[易格][download] 历史目录文件搬移失败（保留原路径）: $error');
       return null;
     }
   }

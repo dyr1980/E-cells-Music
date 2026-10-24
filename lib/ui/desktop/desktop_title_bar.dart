@@ -125,7 +125,7 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> with WindowListener {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        '时音',
+                        '易格音乐',
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),

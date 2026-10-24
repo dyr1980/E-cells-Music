@@ -10,7 +10,7 @@ void main() {
       );
 
       expect(config.channelId, 'shiyin_music.playback_phone');
-      expect(config.channelName, '时音 播放控制');
+      expect(config.channelName, '易格音乐 播放控制');
     });
 
     test('原生车机设备（isAutomotiveDevice 为 true）使用车机专属静默渠道', () {
@@ -20,7 +20,7 @@ void main() {
       );
 
       expect(config.channelId, 'shiyin_music.playback_car');
-      expect(config.channelName, '时音 车机播放控制');
+      expect(config.channelName, '易格音乐 车机播放控制');
     });
 
     test('用户手动开启车机模式（isCarMode 为 true）使用车机专属静默渠道', () {
@@ -30,7 +30,7 @@ void main() {
       );
 
       expect(config.channelId, 'shiyin_music.playback_car');
-      expect(config.channelName, '时音 车机播放控制');
+      expect(config.channelName, '易格音乐 车机播放控制');
     });
 
     test('两者皆为 true 时使用车机专属静默渠道', () {
@@ -40,7 +40,7 @@ void main() {
       );
 
       expect(config.channelId, 'shiyin_music.playback_car');
-      expect(config.channelName, '时音 车机播放控制');
+      expect(config.channelName, '易格音乐 车机播放控制');
     });
   });
 

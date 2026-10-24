@@ -159,7 +159,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         // mediaItem 抢回去，歌词/高潮等已有 hash 序号守卫，唯独主播放
         // 路径此前没有。
         if (currentSong?.hash != song.hash) {
-          debugPrint('[时音][player] 地址解析期间已切歌，丢弃旧结果: ${song.title}');
+          debugPrint('[易格][player] 地址解析期间已切歌，丢弃旧结果: ${song.title}');
           _nextLog('playSong 放弃(解析期间已切歌): ${song.title}');
           return;
         }
@@ -198,7 +198,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 旧歌的 seek/play/缓存后置动作全部作废，避免新歌被旧歌的
       // 播放指令打回。
       if (currentSong?.hash != song.hash) {
-        debugPrint('[时音][player] 加载期间已切歌，中止旧歌后续动作: ${song.title}');
+        debugPrint('[易格][player] 加载期间已切歌，中止旧歌后续动作: ${song.title}');
         _nextLog('playSong 放弃(加载期间已切歌): ${song.title}');
         return;
       }
@@ -243,7 +243,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           downloadController?.cacheForPlayback(song, audioQuality, networkUrl),
         );
       } else if (networkUrl != null) {
-        debugPrint('[时音][player] 蜂窝网络跳过播后缓存: ${song.title}');
+        debugPrint('[易格][player] 蜂窝网络跳过播后缓存: ${song.title}');
       }
     } catch (error) {
       if (_disposed) return;
@@ -271,7 +271,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
           _autoSkippedInStreak == 0) {
         // 等待期间用户可能已切歌：旧歌的自动重试不得抢回播放权。
         if (currentSong?.hash != song.hash) {
-          debugPrint('[时音][player] 重试前歌曲已切换，放弃重试: ${song.title}');
+          debugPrint('[易格][player] 重试前歌曲已切换，放弃重试: ${song.title}');
           return;
         }
         errorMessage = '播放失败，正在重试...';
@@ -279,10 +279,10 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         await Future<void>.delayed(const Duration(seconds: 2));
         if (_disposed) return;
         if (currentSong?.hash != song.hash) {
-          debugPrint('[时音][player] 重试等待期间歌曲已切换，放弃重试: ${song.title}');
+          debugPrint('[易格][player] 重试等待期间歌曲已切换，放弃重试: ${song.title}');
           return;
         }
-        debugPrint('[时音][player] 播放失败，自动重试: ${song.title} ($error)');
+        debugPrint('[易格][player] 播放失败，自动重试: ${song.title} ($error)');
         await playSong(
           song,
           queue: queue,
@@ -295,7 +295,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       // 确定性失败落错误态前同样确认仍是当前歌：切歌后的旧错误不得
       // 覆盖新歌的加载/播放状态。
       if (currentSong?.hash != song.hash) {
-        debugPrint('[时音][player] 失败落错误态前歌曲已切换，跳过: ${song.title}');
+        debugPrint('[易格][player] 失败落错误态前歌曲已切换，跳过: ${song.title}');
         return;
       }
       unawaited(_audioHandler.pause());
@@ -407,7 +407,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       _consecutiveNearEndSkips = 0;
       _nearEndSkipStreakSince = null;
       debugPrint(
-        '[时音][player] 曲末解码失败，按播完自动切歌: ${song.title} '
+        '[易格][player] 曲末解码失败，按播完自动切歌: ${song.title} '
         '(${errorPosition.inMilliseconds}/${songDuration.inMilliseconds}ms, $error)',
       );
       _nextLog(
@@ -419,7 +419,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       return;
     }
 
-    debugPrint('[时音][player] 播放中出错: ${song.title} ($error)');
+    debugPrint('[易格][player] 播放中出错: ${song.title} ($error)');
     _nextLog(
       '引擎错误 → 非曲末，落"播放中断"失败路径: ${song.title} '
       'errorPos=${errorPosition.inMilliseconds}ms '
@@ -470,7 +470,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
     if (_consecutiveNearEndSkips >= effectiveLimit || overBudget) {
       debugPrint(
-        '[时音][player] 曲末跳过已达上限 '
+        '[易格][player] 曲末跳过已达上限 '
         '($_consecutiveNearEndSkips/$effectiveLimit'
         '${overBudget ? '，已超墙钟预算' : ''})，停止自动切歌: ${song.title}',
       );
@@ -487,7 +487,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       '曲末跳过计入预算 ($_consecutiveNearEndSkips/$effectiveLimit): ${song.title}',
     );
     debugPrint(
-      '[时音][player] 曲末失败计入跳过预算 '
+      '[易格][player] 曲末失败计入跳过预算 '
       '($_consecutiveNearEndSkips/$effectiveLimit): ${song.title}',
     );
     return true;
@@ -526,7 +526,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         DateTime.now().difference(since) >= _kAutoSkipWallClockBudget;
     if (_autoSkippedInStreak >= skipLimit || overBudget) {
       debugPrint(
-        '[时音][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
+        '[易格][player] 连续失败 $_consecutivePlayFailures 次，本轮已自动跳过 '
         '$_autoSkippedInStreak 首（上限 $skipLimit'
         '${overBudget ? '，已超墙钟预算 $_kAutoSkipWallClockBudget' : ''}），停止跳转',
       );
@@ -535,7 +535,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
     _autoSkippedInStreak++;
     debugPrint(
-      '[时音][player] 连续失败 $_consecutivePlayFailures 次，自动跳过: ${song.title}',
+      '[易格][player] 连续失败 $_consecutivePlayFailures 次，自动跳过: ${song.title}',
     );
     Toast.show('《${song.title}》播放失败，已跳过');
     // 脱离当前调用栈：本流程的 finally 尚未执行，直接 await next() 会形成
@@ -609,7 +609,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         final retryUrl = await _api.songUrl(song, quality: fallback);
         if (retryUrl.url.isNotEmpty) {
           debugPrint(
-            '[时音][smart-quality] ${audioQuality.badge} 失败，'
+            '[易格][smart-quality] ${audioQuality.badge} 失败，'
             '已降级为 ${fallback.badge}',
           );
           return retryUrl;
@@ -634,7 +634,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       final result = await vipClaim!.claimNow(null);
       if (result.status == VipClaimStatus.success ||
           result.status == VipClaimStatus.alreadyClaimed) {
-        debugPrint('[时音][player] VIP 已领取，重试播放: ${song.title}');
+        debugPrint('[易格][player] VIP 已领取，重试播放: ${song.title}');
         final playUrl = await _api.songUrl(song, quality: audioQuality);
         if (playUrl.url.isNotEmpty) {
           errorMessage = null;
@@ -653,7 +653,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         }
       }
     } catch (e) {
-      debugPrint('[时音][player] VIP 领取/重试失败: $e');
+      debugPrint('[易格][player] VIP 领取/重试失败: $e');
     }
     return false;
   }
@@ -780,7 +780,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
         // UI 调用方（歌词行点击等）丢弃本 Future：seek 在非 idle 引擎错误
         // （蓝牙断开/后端抖动）下会故意 rethrow（见 seek 注释），这里不接住
         // 就成了未捕获异步异常。与 queue.dart 的 _seekToStartSafe 同理。
-        debugPrint('[时音][player] seekToAndPlay 失败: $error');
+        debugPrint('[易格][player] seekToAndPlay 失败: $error');
         return;
       }
       // 调用方（歌词点击等）常丢弃本 Future，起播失败必须就地接住，
@@ -788,7 +788,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
       try {
         await _ensurePlaying();
       } catch (error) {
-        debugPrint('[时音][player] seekToAndPlay 起播失败: $error');
+        debugPrint('[易格][player] seekToAndPlay 起播失败: $error');
       }
     }
   }
@@ -857,7 +857,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     }
     if (_isHandlingCompletion) {
       // 不同歌说明用户已切走且新歌又播完，放行新歌，旧流程自弃
-      debugPrint('[时音][player] 上一首完成处理中，新歌又完成，直接处理新歌');
+      debugPrint('[易格][player] 上一首完成处理中，新歌又完成，直接处理新歌');
     }
     _isHandlingCompletion = true;
     _handlingCompletedHash = song.hash;
@@ -911,7 +911,7 @@ mixin _PlayerPlayback on _PlayerControllerBase {
     } catch (error) {
       // playSong 内部不抛；这里只可能是 seek/play 引擎异常，记日志
       // 落错误态，避免 unawaited 调用方的未处理异常
-      debugPrint('[时音][player] 完成处理失败: $error');
+      debugPrint('[易格][player] 完成处理失败: $error');
       _nextLog('完成处理异常: ${song.title} → $error');
       if (currentSong?.hash == song.hash) {
         errorMessage = error.toString();

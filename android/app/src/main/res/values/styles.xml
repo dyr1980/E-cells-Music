@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
-        <item name="android:windowBackground">@drawable/launch_background</item>
+    <!-- 启动主题（易格音乐同款）：彩色背景 + 应用图标。Android 12+ 走系统
+         启动屏；API 26-31 由 androidx core-splashscreen 兼容层呈现同款。
+         MainActivity.onCreate 里的 installSplashScreen() 负责切换到
+         postSplashScreenTheme（NormalTheme）。背景色见 colors.xml 的
+         splash_background（暗色模式取 values-night/colors.xml 的深色值）。 -->
+    <style name="LaunchTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/NormalTheme</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.
          This theme determines the color of the Android Window while your

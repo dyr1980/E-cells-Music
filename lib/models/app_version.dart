@@ -144,12 +144,12 @@ class AppVersionInfo {
 /// - Windows 安装版：优先 `*-setup.exe`，回退任意 `.exe`；
 /// - Linux：优先 `.deb`，回退 `*-portable.tar.gz`；
 /// - Android：按「渲染引擎 + ABI」逐级放宽匹配 `.apk`——
-///   1. 同时含 `-$renderer` 与 `-$abi`（如 `shiyin-v3.0.2-skia-arm32.apk`）；
-///   2. 含 `-$abi`（附件命名无渲染段的兜底）；
-///   3. 含 `-$renderer`（老 Release 无本 ABI 附件时只能拿另一架构——
-///      v3.0.2 前只发过 arm64，不存在 32 位正式用户，可接受）；
-///   4. 第一个 `.apk`（兼容双包之前的老 Release；发版时 impeller 包
-///      放前面，老客户端行为不变）。
+///   1. 同时含 `-$renderer` 与 `-$abi`（如 `e-cells-music-v2.0.0-skia-arm32.apk`）；
+///   2. 含 `-$abi` 或其 NDK 别名（`arm64`↔`arm64-v8a`、`arm32`↔
+///      `armeabi-v7a`；兼容易格音乐 1.x 的附件命名，如
+///      `e-cells-music-arm64-v8a-2.0.0.apk`）；
+///   3. 含 `-$renderer`（Release 无本 ABI 附件时只能拿另一架构）；
+///   4. 第一个 `.apk`（兜底；发版时 impeller 包放前面，老客户端行为不变）。
 ///
 /// 选不中返回空字符串，调用方回退 Release 页面。
 String pickUpdateAssetUrl(
@@ -191,12 +191,22 @@ String pickUpdateAssetUrl(
   final want = renderer.trim().toLowerCase();
   final wantAbi = abi.trim().toLowerCase();
 
+  // ABI 别名：构建口径 arm64/arm32 ↔ Android NDK ABI 名
+  // （arm64-v8a / armeabi-v7a，兼容易格音乐 1.x 的附件命名习惯）。
+  final abiTokens = <String>{
+    if (wantAbi == 'arm64') ...['arm64', 'arm64-v8a'],
+    if (wantAbi == 'arm32') ...['arm32', 'armeabi-v7a'],
+  };
+
   String? firstContaining(String token) {
     for (final asset in apks) {
       if (asset.$1.toLowerCase().contains(token)) return asset.$2;
     }
     return null;
   }
+
+  bool containsAbiToken(String name) =>
+      abiTokens.any((t) => name.contains('-$t'));
 
   if (want.isNotEmpty && wantAbi.isNotEmpty) {
     for (final asset in apks) {
@@ -206,9 +216,11 @@ String pickUpdateAssetUrl(
       }
     }
   }
-  if (wantAbi.isNotEmpty) {
-    final hit = firstContaining('-$wantAbi');
-    if (hit != null) return hit;
+  if (abiTokens.isNotEmpty) {
+    // 仅按 ABI（含别名）：匹配无渲染段的历史命名附件。
+    for (final asset in apks) {
+      if (containsAbiToken(asset.$1.toLowerCase())) return asset.$2;
+    }
   }
   if (want.isNotEmpty) {
     final hit = firstContaining('-$want');

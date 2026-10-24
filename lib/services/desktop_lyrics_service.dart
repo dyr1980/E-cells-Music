@@ -302,7 +302,7 @@ class DesktopLyricsService {
 
   /// 桌面分支（悬浮窗桥接）：Windows 与 Linux。两侧 runner 均已注册
   /// desktop_multi_window 子窗的 window_manager 插件
-  /// （windows/runner/main.cpp 与 linux/runner/my_application.cc 的
+  /// （历史：原 windows/runner/main.cpp 与 linux/runner/my_application.cc 的
   /// SetWindowCreatedCallback），悬浮窗的 frameless/置顶/跳过任务栏可用。
   static bool get _isDesktopBridge =>
       !kIsWeb &&

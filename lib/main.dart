@@ -65,7 +65,7 @@ Future<void> main(List<String> args) async {
   // 全局未捕获异步异常兜底：此前无任何 onError，异常只进控制台且 release
   // 下不可见。这里仅记录并标记已处理（返回 true），不改变既有降级行为。
   PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('[时音][fatal] 未捕获异步异常: $error\n$stack');
+    debugPrint('[易格][fatal] 未捕获异步异常: $error\n$stack');
     return true;
   };
   // 图片缓存策略：
@@ -94,7 +94,7 @@ Future<void> main(List<String> args) async {
         : AppConfig.imageDiskCacheMaxBytes,
   );
   // 旧标识（ka_music_* 键与目录、Windows com.example / Linux 旧 app id
-  // 数据目录）→ 时音命名的一次性迁移。必须先于 RustApiClient.getInstance()
+  // 数据目录）→ shiyin_* 命名的一次性迁移。必须先于 RustApiClient.getInstance()
   // 与首次 SharedPreferences 访问：支持目录路径取决于 CompanyName/app id，
   // 迁移晚跑会把登录会话（kg_session.json）与旧键留在旧目录。
   // 迁移内部各阶段独立 try/catch，失败不阻断启动。
@@ -137,7 +137,7 @@ Future<void> main(List<String> args) async {
     if (!kIsWeb && (Platform.isLinux || Platform.isWindows)) {
       // Windows 音量合成器/任务管理器里的进程显示名（mpv 原生侧使用，
       // Linux 忽略）；不设则显示默认的 "JustAudioMediaKit"。
-      if (Platform.isWindows) JustAudioMediaKit.title = '时音';
+      if (Platform.isWindows) JustAudioMediaKit.title = '易格音乐';
       JustAudioMediaKit.ensureInitialized();
     }
 
@@ -176,7 +176,7 @@ Future<void> main(List<String> args) async {
     // cargo 产物缺失、架构不符；其次窗口/音频服务初始化异常）。此前直接
     // 白屏/白窗且无任何提示。这里以最小依赖（纯 Flutter，不碰引擎）跑一个
     // 错误说明页，至少让用户知道要重装或检查杀软。
-    debugPrint('[时音][fatal] 启动初始化失败: $error\n$stack');
+    debugPrint('[易格][fatal] 启动初始化失败: $error\n$stack');
     // 若关闭拦截已开启而托盘不会创建（Tray.init 在 ShiyinApp.initState），
     // 错误页点 X 会被藏进不存在的托盘，进程永久隐形。先解除拦截。
     await DesktopWindow.disableCloseInterception();

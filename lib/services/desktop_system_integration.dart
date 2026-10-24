@@ -19,7 +19,7 @@ import '../ui/desktop/desktop_window.dart';
 /// 下载完成通知的标题（单曲与批量一致，正文区分）。
 const String kDownloadNotificationTitle = '下载完成';
 
-/// 主窗标题随播放的格式：'歌名 - 歌手 - 时音'，无播放回 '时音'。
+/// 主窗标题随播放的格式：'歌名 - 歌手 - 易格音乐'，无播放回 '易格音乐'。
 ///
 /// 纯函数（供单测）；[DesktopWindowTitleBinder] 负责监听与设置。
 String formatDesktopWindowTitle({

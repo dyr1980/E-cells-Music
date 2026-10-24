@@ -1,7 +1,7 @@
 name: shiyin_music
-description: "the best music application"
+description: "易格音乐 - 为车机打造的第三方音乐播放器（Flutter）"
 publish_to: 'none'
-version: 3.0.13+3000013
+version: 2.0.0+2000000
 
 environment:
   sdk: ^3.11.5
@@ -85,7 +85,7 @@ dev_dependencies:
 
 dependency_overrides:
   # 本地 vendored 副本（packages/window_manager），勿直接换回 pub.dev 版本：
-  # windows/runner 下两处关键补丁——
+  # 历史上 windows/runner 下有两处关键补丁（v2.0.0 起桌面端已移除，仅留副本）——
   # 1) 全局静态 MethodChannel 改为实例成员 channel_：desktop_multi_window
   #    子窗二次注册插件时，上游全局 channel 会被覆盖/析构置空，导致主窗
   #    窗口事件（几何保存/关闭拦截）全部失效；
@@ -113,7 +113,5 @@ dependency_overrides:
 flutter:
   uses-material-design: true
   assets:
-    - update.md
     - lib/assets/logo.png
     - lib/assets/logo_line.svg
-    - lib/assets/app_icon.ico

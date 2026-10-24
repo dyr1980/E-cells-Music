@@ -955,7 +955,7 @@ class _LyricsPreviewCard extends StatelessWidget {
               body = Align(
                 alignment: lineAlignment,
                 child: LyricsKaraokeLine(
-                  text: '时音 听我想听',
+                  text: '易格音乐 懂你的每一首热爱',
                   fontSize: settings.fontSize,
                   playedColor: playedColor,
                   unplayedColor: unplayedColor,
@@ -1005,7 +1005,7 @@ class _LyricsPreviewCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   previewLine(
-                    text: '时音 听我想听',
+                    text: '易格音乐 懂你的每一首热爱',
                     active: true,
                     align: isSplit ? Alignment.centerLeft : lineAlignment,
                     align2: isSplit ? TextAlign.left : textAlign,

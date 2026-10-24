@@ -312,7 +312,7 @@ mixin _PlayerLyrics on _PlayerControllerBase {
         }
       }
     } catch (error) {
-      debugPrint('[时音][歌词] 歌词进度偏移恢复失败（跳过）: $error');
+      debugPrint('[易格][歌词] 歌词进度偏移恢复失败（跳过）: $error');
     }
   }
 

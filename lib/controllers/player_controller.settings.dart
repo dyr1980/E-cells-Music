@@ -155,7 +155,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
         final playUrl = await _resolvePlayUrl(song);
         // 解析耗时数秒，期间用户可能已切歌：旧音质不得抢引擎
         if (currentSong?.hash != song.hash) {
-          debugPrint('[时音][player] 切音质解析期间已切歌，丢弃旧结果');
+          debugPrint('[易格][player] 切音质解析期间已切歌，丢弃旧结果');
           return;
         }
         if (playUrl.url.isEmpty) {
@@ -185,7 +185,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
       );
       // 加载期间同样可能被切歌抢先：旧音质的 seek/play 全部作废
       if (currentSong?.hash != song.hash) {
-        debugPrint('[时音][player] 切音质加载期间已切歌，中止旧后续动作');
+        debugPrint('[易格][player] 切音质加载期间已切歌，中止旧后续动作');
         return;
       }
       if (targetPosition > Duration.zero) {
@@ -219,7 +219,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
         if (claimed) return;
       }
       if (currentSong?.hash != song.hash) {
-        debugPrint('[时音][player] 切音质失败时歌曲已切换，跳过错误态');
+        debugPrint('[易格][player] 切音质失败时歌曲已切换，跳过错误态');
         return;
       }
       errorMessage = error.toString();
@@ -601,7 +601,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     } catch (error) {
       // 恢复失败不阻断启动，但持久化数据半损坏（字段类型变化等）时必须
       // 留有线索，否则"重启后队列静默丢失"无从排查。
-      debugPrint('[时音][player] 播放状态恢复失败（跳过）: $error');
+      debugPrint('[易格][player] 播放状态恢复失败（跳过）: $error');
     }
   }
 
@@ -669,7 +669,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
         _listenTimeTimer = null;
       }
     } catch (error) {
-      debugPrint('[时音][listen-time] report failed: $error');
+      debugPrint('[易格][listen-time] report failed: $error');
     } finally {
       _isReportingListenTime = false;
     }

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  时音 APK 构建脚本（pwsh 版，与 build_apk.bat 同功能）。
+  易格音乐 APK 构建脚本（pwsh 版，与 build_apk.bat 同功能）。
 .DESCRIPTION
   用法: .\build_apk.ps1 [impeller|skia] [release|debug] [arm64|arm32]
     第一个参数是渲染引擎，默认 impeller（老机器闪退/冻屏再打 skia 版）
@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 Write-Host '============================================'
-Write-Host '  时音 - APK 构建工具 (ps1)'
+Write-Host '  易格音乐 - APK 构建工具 (ps1)'
 Write-Host '============================================'
 
 # 兼容老用法：第一个参数是构建类型时视为 impeller + 该类型

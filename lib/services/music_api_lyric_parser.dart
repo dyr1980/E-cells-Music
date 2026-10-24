@@ -771,7 +771,7 @@ void _debugLyricLog(String message) {
   if (!AppConfig.debugLyrics || !kDebugMode) {
     return;
   }
-  debugPrint('[时音][lyrics] $message');
+  debugPrint('[易格][lyrics] $message');
 }
 
 void _debugLyricLogObject(String label, Object? value) {
@@ -786,11 +786,11 @@ void _debugLyricContent(String label, String content) {
   if (!AppConfig.debugLyrics || !kDebugMode) {
     return;
   }
-  debugPrint('[时音][lyrics] ==== $label ====');
+  debugPrint('[易格][lyrics] ==== $label ====');
   const chunkSize = 1800;
   for (var start = 0; start < content.length; start += chunkSize) {
     final end = (start + chunkSize).clamp(0, content.length);
     debugPrint(content.substring(start, end));
   }
-  debugPrint('[时音][lyrics] ==== end $label ====');
+  debugPrint('[易格][lyrics] ==== end $label ====');
 }

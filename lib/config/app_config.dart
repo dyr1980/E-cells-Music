@@ -1,12 +1,12 @@
 class AppConfig {
   const AppConfig._();
 
-  static const appName = '时音';
-  static const appVersion = '3.0.13';
+  static const appName = '易格音乐';
+  static const appVersion = '2.0.0';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。3.0.13 → 3000013。
-  static const appVersionCode = '3000013';
+  /// 的 semverToCode 与 docs/release-process.md）。2.0.0 → 2000000。
+  static const appVersionCode = '2000000';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
@@ -24,8 +24,8 @@ class AppConfig {
 
   /// 当前包的目标 ABI，由构建时 `--dart-define=APP_ABI=arm64|arm32`
   /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传；产物名含 `-$abi-`，
-  /// 如 `shiyin-v3.0.2-skia-arm32.apk`）。更新检查配合 [renderer] 选包，
-  /// 32 位车机拿到 arm64 包无法安装。本地构建默认 arm64。
+  /// 如 `e-cells-music-v2.0.0-skia-arm32.apk`）。更新检查配合 [renderer]
+  /// 选包，32 位车机拿到 arm64 包无法安装。本地构建默认 arm64。
   static const abi = String.fromEnvironment(
     'APP_ABI',
     defaultValue: 'arm64',
@@ -98,9 +98,10 @@ class AppConfig {
   static const maxConcurrentDownloads = 3;
 
   // ===== 检查更新（GitHub Releases，无后端） =====
-  /// 托管 Release / APK 的 GitHub 仓库。CI 打 tag 时会在此发布带 APK 附件的 Release。
-  static const githubRepoOwner = 'bamboostrip';
-  static const githubRepoName = 'shiyin-music';
+  /// 托管 Release / APK 的 GitHub 仓库（易格音乐 1.x 起沿用的发布仓库）。
+  /// CI 打 tag 时会在此发布带 APK 附件的 Release。
+  static const githubRepoOwner = 'e-cells';
+  static const githubRepoName = 'E-cells-Music';
 
   /// GitHub Releases 最新正式版接口（公开仓库无需鉴权，但必须带 User-Agent）。
   /// 注意：api.github.com 未鉴权限额 60 次/时/IP，超限返回 403。
@@ -127,7 +128,7 @@ class AppConfig {
   static const githubReleasesLatestPageUrl = '$githubRepoUrl/releases/latest';
 
   /// 请求 GitHub API 时的 User-Agent（GitHub 要求非空，否则 403）。
-  static const githubUpdateUserAgent = 'ShiYin-App/$appVersion';
+  static const githubUpdateUserAgent = 'ECellsMusic-App/$appVersion';
 
   /// 启动时自动检查更新的最小间隔（手动检查不受此限制）。
   static const updateAutoCheckInterval = Duration(hours: 24);

@@ -107,7 +107,7 @@ class AudioEffectsService {
       }
       return EqualizerConfig.fromMap(result);
     } on PlatformException catch (error) {
-      debugPrint('[时音][audio-effects] Equalizer config failed: $error');
+      debugPrint('[易格][audio-effects] Equalizer config failed: $error');
       return null;
     } on MissingPluginException {
       return null;
@@ -132,7 +132,7 @@ class AudioEffectsService {
       });
       return result ?? false;
     } on PlatformException catch (error) {
-      debugPrint('[时音][audio-effects] Equalizer failed: $error');
+      debugPrint('[易格][audio-effects] Equalizer failed: $error');
       return false;
     } on MissingPluginException {
       return false;
@@ -158,7 +158,7 @@ class AudioEffectsService {
       });
       return result ?? false;
     } on PlatformException catch (error) {
-      debugPrint('[时音][audio-effects] BassBoost failed: $error');
+      debugPrint('[易格][audio-effects] BassBoost failed: $error');
       return false;
     } on MissingPluginException {
       return false;
@@ -184,7 +184,7 @@ class AudioEffectsService {
       });
       return result ?? false;
     } on PlatformException catch (error) {
-      debugPrint('[时音][audio-effects] Virtualizer failed: $error');
+      debugPrint('[易格][audio-effects] Virtualizer failed: $error');
       return false;
     } on MissingPluginException {
       return false;

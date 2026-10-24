@@ -95,7 +95,7 @@ class LegacyMigration {
       try {
         await _migratePlatformDataDirs();
       } catch (error, stack) {
-        debugPrint('[时音][migration] 平台数据目录迁移异常（已跳过）: $error\n$stack');
+        debugPrint('[易格][migration] 平台数据目录迁移异常（已跳过）: $error\n$stack');
       }
     }
     SharedPreferences? prefs;
@@ -103,19 +103,19 @@ class LegacyMigration {
       prefs = await SharedPreferences.getInstance();
       await _migratePrefKeys(prefs);
     } catch (error, stack) {
-      debugPrint('[时音][migration] 旧键迁移异常（已跳过）: $error\n$stack');
+      debugPrint('[易格][migration] 旧键迁移异常（已跳过）: $error\n$stack');
     }
     if (prefs == null) return;
     // 下载/播放缓存目录迁移彼此独立，任一失败不影响另一个。
     try {
       await _migrateDownloadsDir(prefs);
     } catch (error, stack) {
-      debugPrint('[时音][migration] 下载目录迁移异常（已跳过）: $error\n$stack');
+      debugPrint('[易格][migration] 下载目录迁移异常（已跳过）: $error\n$stack');
     }
     try {
       await _migratePlayCacheDir(prefs);
     } catch (error, stack) {
-      debugPrint('[时音][migration] 播放缓存目录迁移异常（已跳过）: $error\n$stack');
+      debugPrint('[易格][migration] 播放缓存目录迁移异常（已跳过）: $error\n$stack');
     }
   }
 
@@ -162,7 +162,7 @@ class LegacyMigration {
     if (ok) {
       await prefs.remove(from);
     } else {
-      debugPrint('[时音][migration] 迁移键 $from → $to 写入失败，保留旧键');
+      debugPrint('[易格][migration] 迁移键 $from → $to 写入失败，保留旧键');
     }
   }
 
@@ -236,7 +236,7 @@ class LegacyMigration {
     if (await newDir.exists() && await _directoryHasEntries(newDir)) {
       // 新旧目录都非空：不做合并（避免同名覆盖），旧索引路径继续有效，
       // 新下载自然落到新目录。
-      debugPrint('[时音][migration] $oldName 与 $newName 并存，跳过目录合并');
+      debugPrint('[易格][migration] $oldName 与 $newName 并存，跳过目录合并');
       return;
     }
     try {
@@ -245,10 +245,10 @@ class LegacyMigration {
       if (await newDir.exists()) await newDir.delete();
       await oldDir.rename(newPath);
       await _rewriteIndex(prefs, indexKey, oldName, newName);
-      debugPrint('[时音][migration] 已迁移目录 $oldName → $newName');
+      debugPrint('[易格][migration] 已迁移目录 $oldName → $newName');
     } catch (error) {
       // 跨卷 rename 等失败：保持旧路径可用，不重写索引。
-      debugPrint('[时音][migration] 目录 $oldName 迁移失败（保留旧路径）: $error');
+      debugPrint('[易格][migration] 目录 $oldName 迁移失败（保留旧路径）: $error');
     }
   }
 
@@ -387,10 +387,10 @@ class LegacyMigration {
     try {
       if (await oldPlist.exists() && !await newPlist.exists()) {
         await oldPlist.copy(newPlist.path);
-        debugPrint('[时音][migration] 已复制 macOS 偏好域 $_oldMacosBundleId → $_newMacosBundleId');
+        debugPrint('[易格][migration] 已复制 macOS 偏好域 $_oldMacosBundleId → $_newMacosBundleId');
       }
     } catch (error) {
-      debugPrint('[时音][migration] macOS 偏好域复制失败: $error');
+      debugPrint('[易格][migration] macOS 偏好域复制失败: $error');
     }
   }
 
@@ -422,7 +422,7 @@ class LegacyMigration {
     try {
       if (await newDir.exists()) {
         if (await _directoryHasEntries(newDir)) {
-          debugPrint('[时音][migration] $label：目标已存在且非空，跳过合并');
+          debugPrint('[易格][migration] $label：目标已存在且非空，跳过合并');
           return;
         }
         // rename 要求目标不存在：空壳目录先删。
@@ -432,9 +432,9 @@ class LegacyMigration {
       final parent = newDir.parent;
       if (!await parent.exists()) await parent.create(recursive: true);
       await oldDir.rename(newPath);
-      debugPrint('[时音][migration] 已迁移 $label');
+      debugPrint('[易格][migration] 已迁移 $label');
     } catch (error) {
-      debugPrint('[时音][migration] $label 迁移失败（保留旧路径）: $error');
+      debugPrint('[易格][migration] $label 迁移失败（保留旧路径）: $error');
     }
   }
 }
