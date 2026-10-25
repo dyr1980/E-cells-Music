@@ -15,10 +15,19 @@ import '../widgets/app_dialog.dart';
 import '../widgets/toast.dart';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.auth, required this.api});
+  const LoginPage({
+    super.key,
+    required this.auth,
+    required this.api,
+    this.isAddAccount = false,
+  });
 
   final AuthController auth;
   final MusicApi api;
+
+  /// 添加账号模式：已登录状态下从账号面板 push 进来。显示返回按钮，
+  /// 新账号登录被采纳（活跃 userId 变化）后自动 pop 回应用。
+  final bool isAddAccount;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -51,10 +60,50 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
   Timer? _qrRotateTimer;
   static const _qrRotateInterval = Duration(seconds: 30);
 
+  // 微信扫码（默认 tab）：状态与酷狗扫码分离——微信码没有固定 30 秒
+  // 生命周期（过期由 wx_errcode=402 通知），不自动换码，轮询 3 秒一拍。
+  QrCodeInfo? _wxQr;
+  String _wxStatusText = '';
+  bool _wxLoading = false;
+  bool _wxExpired = false;
+  Timer? _wxPollTimer;
+  bool _wxPollInFlight = false;
+  static const _wxPollInterval = Duration(seconds: 3);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.isAddAccount) {
+      // 记住进入时的会话：之后活跃 userId 发生变化 = 新账号登录被采纳
+      _sessionAtEntry = widget.auth.session;
+      widget.auth.addListener(_onAuthChangedForPop);
+    }
+    // 默认 tab 即微信扫码，进页即拉码
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadWxQrCode();
+    });
+  }
+
+  LoginSession? _sessionAtEntry;
+
+  /// 添加账号模式：新登录被采纳（活跃 userId 变化）后自动 pop 回应用，
+  /// 用户回到的已是切换完成后的界面。以 userId 变化为信号而非对象身份
+  /// （refreshSession 等也会换 session 对象）；同账号重登不自动退，
+  /// 用户可经返回键手动离开。
+  void _onAuthChangedForPop() {
+    if (!widget.isAddAccount || !mounted) return;
+    final current = widget.auth.session;
+    final entryId = _sessionAtEntry?.userId;
+    if (current == null || !current.isValid) return;
+    final currentId = current.userId;
+    if (currentId == null || currentId.isEmpty) return;
+    if (entryId != null && currentId == entryId) return;
+    // notifyListeners 在真实流程中恒来自异步完成上下文（非 build 期间），
+    // 此处直接 pop 安全；不经 postFrame 帧回调（无新帧时不会冲刷）。
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -73,9 +122,13 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (widget.isAddAccount) {
+      widget.auth.removeListener(_onAuthChangedForPop);
+    }
     _codeTimer?.cancel();
     _qrPollTimer?.cancel();
     _qrRotateTimer?.cancel();
+    _wxPollTimer?.cancel();
     _mobileController.dispose();
     _codeController.dispose();
     _mobileFocus.dispose();
@@ -309,7 +362,7 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
   void _startQrRotateTimer() {
     _qrRotateTimer?.cancel();
     _qrRotateTimer = Timer(_qrRotateInterval, () {
-      if (!mounted || _tabIndex != 1 || _qrScanned || _qrExpired) return;
+      if (!mounted || _tabIndex != 2 || _qrScanned || _qrExpired) return;
       _loadQrCode();
     });
   }
@@ -372,6 +425,90 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _loadWxQrCode() async {
+    _wxPollTimer?.cancel();
+    setState(() {
+      _wxQr = null;
+      _wxStatusText = '获取二维码中...';
+      _wxLoading = true;
+      _wxExpired = false;
+    });
+    try {
+      final qr = await widget.api.createWxLoginQr();
+      if (!mounted) return;
+      setState(() {
+        _wxQr = qr;
+        _wxLoading = false;
+        _wxStatusText = '请使用微信扫一扫';
+      });
+      _startWxPolling(qr.key);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _wxLoading = false;
+        _wxStatusText = '获取二维码失败，点击重试';
+        _wxExpired = true;
+      });
+      _showErrorDialog('获取微信二维码失败：$e');
+    }
+  }
+
+  void _startWxPolling(String uuid) {
+    _wxPollTimer?.cancel();
+    _wxPollTimer = Timer.periodic(_wxPollInterval, (_) async {
+      // 上一次检查还在进行中，跳过本次 tick
+      if (_wxPollInFlight) return;
+      _wxPollInFlight = true;
+      try {
+        final result = await widget.api.checkWxLoginStatus(uuid);
+        if (!mounted) return;
+        if (result.isConfirmed) {
+          _wxPollTimer?.cancel();
+          // wx_code 单次有效：openplat 失败（网络闪断等消耗掉了 code）时
+          // 不能只重试本步，须整段重新拉码——置过期态走「刷新」路径。
+          try {
+            final session = await widget.api.loginByWxOpenplat(result.wxCode!);
+            if (!mounted) return;
+            await widget.auth.loginWithSession(session);
+            if (!mounted) return;
+            if (widget.auth.errorMessage != null &&
+                widget.auth.errorMessage!.isNotEmpty) {
+              _showErrorDialog(widget.auth.errorMessage!);
+            }
+          } catch (e) {
+            if (!mounted) return;
+            setState(() {
+              _wxStatusText = '登录失败，点击刷新重试';
+              _wxExpired = true;
+            });
+            _showErrorDialog('微信登录失败：$e');
+          }
+          return;
+        }
+        // 换码竞态：请求在途时用户手动刷新拉了新码，旧 uuid 的响应
+        // 属于已作废的码（过期态会误杀新码轮询），直接丢弃。
+        if (_wxQr?.key != uuid) return;
+        if (result.isExpired || result.isRefused) {
+          _wxPollTimer?.cancel();
+          setState(() {
+            _wxStatusText = result.isRefused ? '您拒绝了授权，点击刷新' : '二维码已过期，点击刷新';
+            _wxExpired = true;
+          });
+          return;
+        }
+        // 文案没变化就不 setState：避免周期性无谓重建整页（防闪烁同酷狗码）。
+        final text = result.isWaitingForConfirm ? '扫码成功，请在手机上确认' : '请使用微信扫一扫';
+        if (_wxStatusText != text) {
+          setState(() => _wxStatusText = text);
+        }
+      } catch (_) {
+        if (!mounted) return;
+      } finally {
+        _wxPollInFlight = false;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -425,23 +562,43 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              // 添加账号模式：提供返回入口（主形态下本页是
+                              // home，无系统返回 affordance）
+                              if (widget.isAddAccount)
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: IconButton(
+                                    tooltip: '返回',
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop(),
+                                    icon: const Icon(
+                                      Icons.arrow_back_rounded,
+                                    ),
+                                  ),
+                                ),
                               _LoginHeader(colorScheme: colorScheme),
                               const SizedBox(height: 28),
                               _LoginTabBar(
                                 selectedIndex: _tabIndex,
                                 onChanged: (i) {
                                   setState(() => _tabIndex = i);
-                                  if (i == 1) {
-                                    _loadQrCode();
+                                  if (i == 0) {
+                                    _loadWxQrCode();
                                   } else {
-                                    // 切回手机号登录时停止二维码轮询与自动换码
-                                    _qrPollTimer?.cancel();
-                                    _qrRotateTimer?.cancel();
+                                    // 离开微信 tab 即停微信轮询（重新进入会拉新码）
+                                    _wxPollTimer?.cancel();
+                                    if (i == 2) {
+                                      _loadQrCode();
+                                    } else {
+                                      // 手机号登录：停止酷狗二维码轮询与自动换码
+                                      _qrPollTimer?.cancel();
+                                      _qrRotateTimer?.cancel();
+                                    }
                                   }
                                 },
                               ),
                               const SizedBox(height: 20),
-                              if (_tabIndex == 0)
+                              if (_tabIndex == 1)
                                 _LoginForm(
                                   auth: widget.auth,
                                   codeController: _codeController,
@@ -453,6 +610,14 @@ class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver {
                                   mobileFocus: _mobileFocus,
                                   onLogin: _login,
                                   onSendCode: _sendCode,
+                                )
+                              else if (_tabIndex == 0)
+                                _QrLoginForm(
+                                  qrCode: _wxQr,
+                                  isLoading: _wxLoading,
+                                  statusText: _wxStatusText,
+                                  isExpired: _wxExpired,
+                                  onRefresh: _loadWxQrCode,
                                 )
                               else
                                 _QrLoginForm(
@@ -994,6 +1159,9 @@ class _LoginTabBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onChanged;
 
+  // 三个登录方式：微信扫码为默认（index 0），酷狗扫码更名消歧。
+  static const _labels = ['微信登录', '手机号登录', '酷狗扫码'];
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -1004,58 +1172,33 @@ class _LoginTabBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () => onChanged(0),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: selectedIndex == 0
-                      ? colorScheme.surface
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '手机号登录',
-                  style: TextStyle(
-                    color: selectedIndex == 0
-                        ? colorScheme.onSurface
-                        : colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
+          for (var i = 0; i < _labels.length; i++)
+            Expanded(
+              child: GestureDetector(
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: selectedIndex == i
+                        ? colorScheme.surface
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _labels[i],
+                    style: TextStyle(
+                      color: selectedIndex == i
+                          ? colorScheme.onSurface
+                          : colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () => onChanged(1),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  color: selectedIndex == 1
-                      ? colorScheme.surface
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '扫码登录',
-                  style: TextStyle(
-                    color: selectedIndex == 1
-                        ? colorScheme.onSurface
-                        : colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

@@ -99,6 +99,82 @@ class MobileLoginAccount {
   }
 }
 
+/// 本机已保存账号（多账号切换）。
+///
+/// 凭据仅存本机 SharedPreferences（[AuthController] 的账号列表），不上传。
+/// [lastUsedAt]（毫秒）用于「最近使用」排序与登出/移除后的自动切换。
+class SavedAccount {
+  const SavedAccount({
+    required this.userId,
+    this.nickname,
+    this.avatarUrl,
+    this.token,
+    this.t1,
+    this.sessionId,
+    required this.lastUsedAt,
+  });
+
+  /// 唯一键，永不为空（空 userId 的条目在解析时丢弃）。
+  final String userId;
+  final String? nickname;
+  final String? avatarUrl;
+  final String? token;
+  final String? t1;
+  final String? sessionId;
+  final int lastUsedAt;
+
+  String get displayName =>
+      nickname?.trim().isNotEmpty == true ? nickname!.trim() : '账号 $userId';
+
+  LoginSession toLoginSession() => LoginSession(
+    userId: userId,
+    token: token,
+    t1: t1,
+    sessionId: sessionId,
+    nickname: nickname,
+    avatarUrl: avatarUrl,
+  );
+
+  factory SavedAccount.fromLoginSession(LoginSession session, {int? lastUsedAt}) {
+    final uid = session.userId?.trim() ?? '';
+    return SavedAccount(
+      userId: uid,
+      nickname: session.nickname,
+      avatarUrl: session.avatarUrl,
+      token: session.token,
+      t1: session.t1,
+      sessionId: session.sessionId,
+      lastUsedAt: lastUsedAt ?? DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'userId': userId,
+    'nickname': nickname,
+    'avatarUrl': avatarUrl,
+    'token': token,
+    't1': t1,
+    'sessionId': sessionId,
+    'lastUsedAt': lastUsedAt,
+  };
+
+  /// 容错解析：字段缺失/类型漂移按 null 处理；userId 为空视为无效条目
+  /// （返回实例但 [isValid] 为 false，由调用方丢弃）。
+  factory SavedAccount.fromJson(Map<String, dynamic> json) {
+    return SavedAccount(
+      userId: asString(json['userId']) ?? '',
+      nickname: asString(json['nickname']),
+      avatarUrl: asString(json['avatarUrl']),
+      token: asString(json['token']),
+      t1: asString(json['t1']),
+      sessionId: asString(json['sessionId']),
+      lastUsedAt: asInt(json['lastUsedAt']) ?? 0,
+    );
+  }
+
+  bool get isValid => userId.isNotEmpty;
+}
+
 class UserProfile {
   const UserProfile({required this.nickname, this.avatarUrl});
 
@@ -329,6 +405,32 @@ class QrCheckResult {
       userId: asString(json['userid']),
       nickname: asString(json['nickname']),
       avatar: asString(json['pic']),
+    );
+  }
+}
+
+/// 微信扫码登录轮询结果（微信长轮询接口透传，状态语义与酷狗自有码不同）。
+class WxQrCheckResult {
+  const WxQrCheckResult({required this.wxErrcode, this.wxCode});
+
+  final int wxErrcode;
+  final String? wxCode;
+
+  // 微信扫码状态码（open.weixin.qq.com qrconnect 协议）：
+  //   408 = 等待扫码      404 = 已扫码待确认      403 = 用户拒绝授权
+  //   405 = 确认成功（此时携带 wx_code，用于 /login/openplat 换酷狗会话）
+  //   402 = 二维码已过期
+  bool get isWaitingForScan => wxErrcode == 408;
+  bool get isWaitingForConfirm => wxErrcode == 404;
+  bool get isRefused => wxErrcode == 403;
+  bool get isExpired => wxErrcode == 402;
+  bool get isConfirmed =>
+      wxErrcode == 405 && wxCode != null && wxCode!.isNotEmpty;
+
+  factory WxQrCheckResult.fromJson(Map<String, dynamic> json) {
+    return WxQrCheckResult(
+      wxErrcode: asInt(json['wx_errcode']) ?? -1,
+      wxCode: asString(json['wx_code']),
     );
   }
 }

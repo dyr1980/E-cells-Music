@@ -75,10 +75,13 @@ class LyricsOverlayService : Service() {
         private const val RENDER_ADVANCE_MS = 40L
         private const val MIN_POLL_MS = 16L
 
-        // 光感模式迟滞阈值（易格同值）：≤15 lux 判深色、≥30 lux 判浅色，
-        // 区间内保持原状态，避免车机光感跳动导致颜色抖动。
-        private const val LIGHT_THRESHOLD_DARK = 15.0f
-        private const val LIGHT_THRESHOLD_LIGHT = 30.0f
+        // 光感值（深色阈值）出厂默认与合法范围（与 Flutter 侧
+        // AndroidLyricSettings 对齐）：环境亮度 ≤ 阈值判深色、≥ 阈值×2 判浅色，
+        // 区间内保持原状态，避免车机光感跳动导致颜色抖动。阈值可由用户经
+        // 设置页「光感值」调整（白天进隧道等场景调高，使歌词提前切深色）。
+        private const val DEFAULT_SENSOR_DARK_THRESHOLD = 15f
+        private const val SENSOR_DARK_THRESHOLD_MIN = 5f
+        private const val SENSOR_DARK_THRESHOLD_MAX = 1000f
 
         /** 运行中实例（MainActivity 不经绑定直接调用公开方法，易格同构）。 */
         @Volatile
@@ -112,6 +115,12 @@ class LyricsOverlayService : Service() {
     private var lyricWidthPercent = 100
     private var lyricStrokeEnabled = false
     private var lyricAlignment = "center" // left / center / right
+
+    // 光感值（lux，深色阈值）：浅色阈值不单独存储，恒为深色阈值 ×2。
+    private var sensorDarkThreshold = DEFAULT_SENSOR_DARK_THRESHOLD
+    private var sensorLightThreshold = DEFAULT_SENSOR_DARK_THRESHOLD * 2f
+    // 最近一次 lux 读数：阈值被用户调整时立即按新阈值重判，不等下一帧传感器事件。
+    private var lastLux = -1f
 
     // 配置变化广播兜底：部分定制系统（尤其车机）不向后台 Service 回调
     // onConfigurationChanged，注册接收器补一条通路。
@@ -168,6 +177,10 @@ class LyricsOverlayService : Service() {
         lyricStrokeEnabled = prefs.getBoolean("stroke_enabled", false)
         lyricAlignment = prefs.getString("alignment", "center") ?: "center"
         lyricOffsetMs = prefs.getLong("lyric_offset_ms", 0L)
+        sensorDarkThreshold = prefs
+            .getFloat("sensor_dark_threshold", DEFAULT_SENSOR_DARK_THRESHOLD)
+            .coerceIn(SENSOR_DARK_THRESHOLD_MIN, SENSOR_DARK_THRESHOLD_MAX)
+        sensorLightThreshold = sensorDarkThreshold * 2f
 
         createNotificationChannel()
         // 服务只在悬浮窗展示期间存活（开启=起服务、关闭=停服务），onCreate 即
@@ -585,6 +598,7 @@ class LyricsOverlayService : Service() {
         newStrokeEnabled: Boolean,
         newAlignment: String?,
         newLyricOffsetMs: Long,
+        newSensorDarkThreshold: Float,
     ) {
         if (newLightColorIndex in LIGHT_COLOR_HEX.indices) {
             lightColorIndex = newLightColorIndex
@@ -636,9 +650,22 @@ class LyricsOverlayService : Service() {
             lyricOffsetMs = newLyricOffsetMs
             prefs.edit().putLong("lyric_offset_ms", lyricOffsetMs).apply()
         }
+        // -1f 为哨兵值：表示 Flutter 侧未传递光感值，不覆盖当前值。
+        val thresholdChanged = newSensorDarkThreshold >= SENSOR_DARK_THRESHOLD_MIN &&
+            newSensorDarkThreshold != sensorDarkThreshold
+        if (thresholdChanged) {
+            sensorDarkThreshold =
+                newSensorDarkThreshold.coerceAtMost(SENSOR_DARK_THRESHOLD_MAX)
+            sensorLightThreshold = sensorDarkThreshold * 2f
+            prefs.edit().putFloat("sensor_dark_threshold", sensorDarkThreshold).apply()
+        }
 
         handler.post {
             if (line1 == null || overlayView == null) return@post
+            // 光感值刚被调整：先按最近读数重判深浅，再统一重绘歌词颜色。
+            if (thresholdChanged) {
+                recomputeSensorState()
+            }
             applyColorToViews()
             // system 轮询 / sensor 光感的启停与主题模式变化保持对称。
             if (themeChanged) {
@@ -760,14 +787,15 @@ class LyricsOverlayService : Service() {
             override fun onSensorChanged(event: SensorEvent) {
                 if (event.sensor.type != Sensor.TYPE_LIGHT) return
                 val lux = event.values[0]
+                lastLux = lux
                 var stateChanged = false
-                if (lux <= LIGHT_THRESHOLD_DARK) {
+                if (lux <= sensorDarkThreshold) {
                     if (!isSensorDark || !hasInitSensorState) {
                         isSensorDark = true
                         hasInitSensorState = true
                         stateChanged = true
                     }
-                } else if (lux >= LIGHT_THRESHOLD_LIGHT) {
+                } else if (lux >= sensorLightThreshold) {
                     if (isSensorDark || !hasInitSensorState) {
                         isSensorDark = false
                         hasInitSensorState = true
@@ -808,6 +836,27 @@ class LyricsOverlayService : Service() {
         if (sensorManager != null && lightSensorListener != null) {
             sensorManager?.unregisterListener(lightSensorListener)
             Log.i(TAG, "Light sensor unregistered")
+        }
+    }
+
+    /**
+     * 光感值被用户调整后，按最近一次 lux 读数立即重判深浅状态（不等下一帧
+     * 传感器事件）。只更新状态；重绘由调用方随后的 applyColorToViews 完成。
+     */
+    private fun recomputeSensorState() {
+        if (lastLux < 0f) return
+        if (lastLux <= sensorDarkThreshold) {
+            if (!isSensorDark || !hasInitSensorState) {
+                isSensorDark = true
+                hasInitSensorState = true
+                Log.i(TAG, "Sensor threshold adjusted; recompute ($lastLux lux) -> dark")
+            }
+        } else if (lastLux >= sensorLightThreshold) {
+            if (isSensorDark || !hasInitSensorState) {
+                isSensorDark = false
+                hasInitSensorState = true
+                Log.i(TAG, "Sensor threshold adjusted; recompute ($lastLux lux) -> light")
+            }
         }
     }
 

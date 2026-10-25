@@ -117,6 +117,28 @@ class _AndroidLyricSettingsPageState extends State<AndroidLyricSettingsPage> {
               ],
               onChanged: (v) => _update((s) => s.copyWith(themeMode: v)),
             ),
+            // 光感值仅光感模式需要（隧道等场景手动调高切深色的灵敏度）
+            if (_settings.themeMode == AndroidLyricThemeMode.sensor) ...[
+              _SettingsDivider(),
+              _SliderTile(
+                key: const Key('slider_android_sensor_dark_threshold'),
+                icon: Icons.brightness_4_rounded,
+                iconColor: colorScheme.primary,
+                title: '光感值',
+                subtitle: '环境亮度低于该值（lux）时切换深色歌词；白天进隧道'
+                    '歌词仍为浅色时调高它',
+                value: _settings.sensorDarkThreshold.toDouble(),
+                min: AndroidLyricSettings.sensorDarkThresholdMin.toDouble(),
+                max: AndroidLyricSettings.sensorDarkThresholdMax.toDouble(),
+                divisions: (AndroidLyricSettings.sensorDarkThresholdMax -
+                        AndroidLyricSettings.sensorDarkThresholdMin) ~/
+                    AndroidLyricSettings.sensorDarkThresholdStep,
+                label: '${_settings.sensorDarkThreshold} lux',
+                onChanged: (v) => _update(
+                  (s) => s.copyWith(sensorDarkThreshold: v.round()),
+                ),
+              ),
+            ],
             _SettingsDivider(),
             _ColorPaletteRow(
               icon: Icons.light_mode_rounded,
@@ -271,7 +293,8 @@ class _AndroidLyricSettingsPageState extends State<AndroidLyricSettingsPage> {
             child: Text(
               '歌词悬浮窗开启后一直显示（包括应用在前台时），可自由拖动位置。'
               '双行成对推进：唱完第二行才切换到下一对；单行模式第二行显示当前句翻译。'
-              '"光感"主题会根据环境光自动切换深浅配色。'
+              '"光感"主题会根据环境光自动切换深浅配色，'
+              '白天进隧道切不过深色时可调高「光感值」。'
               '调乱了可点右上角「恢复默认」一键还原外观。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
@@ -351,6 +374,7 @@ class _SliderTile extends StatelessWidget {
     required this.label,
     required this.onChanged,
     this.divisions,
+    this.subtitle,
   });
 
   final IconData icon;
@@ -363,63 +387,103 @@ class _SliderTile extends StatelessWidget {
   final ValueChanged<double> onChanged;
   final int? divisions;
 
+  /// 可选副标题：有值时标题/副标题占一行，滑条整行放下方（宽滑条更易细调）。
+  final String? subtitle;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: SizedBox(
-        height: 44,
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: iconColor),
-            const SizedBox(width: 12),
-            Text(
-              title,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 7,
-                  ),
-                  overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 13,
-                  ),
-                ),
-                child: Slider(
-                  value: value.clamp(min, max),
-                  min: min,
-                  max: max,
-                  divisions: divisions,
-                  onChanged: onChanged,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 48,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ],
+    final slider = SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 3,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 13),
+      ),
+      child: Slider(
+        value: value.clamp(min, max),
+        min: min,
+        max: max,
+        divisions: divisions,
+        onChanged: onChanged,
+      ),
+    );
+    final labelWidget = SizedBox(
+      width: 48,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Text(
+          label,
+          maxLines: 1,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
         ),
+      ),
+    );
+
+    if (subtitle == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: iconColor),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: slider),
+              const SizedBox(width: 8),
+              labelWidget,
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: iconColor),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              labelWidget,
+            ],
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: Text(
+              subtitle!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 32),
+            child: slider,
+          ),
+        ],
       ),
     );
   }

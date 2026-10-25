@@ -108,4 +108,45 @@ void main() {
     // 锁定是行为状态：恢复外观不得解锁正在显示的悬浮窗。
     expect(player.androidLyricSettings.locked, isTrue);
   });
+
+  testWidgets('光感值滑条仅光感模式显示，拖动回写设置并更新标签', (tester) async {
+    await pumpPage(tester);
+
+    // 默认跟随系统：不显示光感值。
+    expect(find.text('光感值'), findsNothing);
+
+    await tester.tap(find.text('光感'));
+    await tester.pumpAndSettle();
+    expect(find.text('光感值'), findsOneWidget);
+    expect(find.text('15 lux'), findsOneWidget);
+
+    // 拖动滑条：默认 15 → 更大的值，标签同步、设置回写。
+    final sliderFinder = find.descendant(
+      of: find.byKey(const Key('slider_android_sensor_dark_threshold')),
+      matching: find.byType(Slider),
+    );
+    await tester.ensureVisible(sliderFinder);
+    await tester.pumpAndSettle();
+    await tester.drag(sliderFinder, const Offset(250, 0));
+    await tester.pumpAndSettle();
+
+    expect(player.androidLyricSettings.sensorDarkThreshold,
+        greaterThan(AndroidLyricSettings.defaultSensorDarkThreshold));
+    expect(player.updates.last.sensorDarkThreshold,
+        player.androidLyricSettings.sensorDarkThreshold);
+    expect(find.text('${player.androidLyricSettings.sensorDarkThreshold} lux'),
+        findsOneWidget);
+
+    // 切回跟随系统：滑条隐藏，但值保留（再次切回光感时仍是新值）。
+    // 拖动后页面变长，先滚回顶部确保分段按钮可见再点击。
+    await tester.ensureVisible(find.text('跟随系统'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('跟随系统'));
+    await tester.pumpAndSettle();
+    expect(find.text('光感值'), findsNothing);
+    expect(
+      player.androidLyricSettings.sensorDarkThreshold,
+      greaterThan(AndroidLyricSettings.defaultSensorDarkThreshold),
+    );
+  });
 }

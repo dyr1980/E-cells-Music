@@ -8,6 +8,7 @@ import '../../controllers/player_controller.dart';
 import '../../controllers/theme_controller.dart';
 import '../../models/music_models.dart';
 import '../../services/music_api.dart';
+import '../widgets/account_switcher_sheet.dart';
 import '../widgets/app_dialog.dart';
 import '../widgets/artwork.dart';
 import '../widgets/toast.dart';
@@ -368,11 +369,22 @@ class LibraryPageState extends State<LibraryPage> {
                     ),
                   ),
 
-                  // 2. 用户资料头部（同款用户区域）
+                  // 2. 用户资料头部（同款用户区域）：点击弹出账号切换面板
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
-                      child: _UserProfileHeader(auth: widget.auth),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => showAccountSwitcherSheet(
+                            context,
+                            auth: widget.auth,
+                            api: widget.api,
+                          ),
+                          child: _UserProfileHeader(auth: widget.auth),
+                        ),
+                      ),
                     ),
                   ),
 
@@ -697,6 +709,21 @@ class _UserProfileHeader extends StatelessWidget {
                   ],
                 ),
               ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 账号切换入口暗示（整个头部可点，弹账号切换面板）
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: colorScheme.surfaceContainerHigh,
+            ),
+            child: Icon(
+              Icons.swap_horiz_rounded,
+              size: 18,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         ],

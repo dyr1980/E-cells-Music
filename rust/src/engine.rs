@@ -248,6 +248,19 @@ impl KugouEngine {
                 self.persist_login(&resp);
                 Ok(resp)
             }
+            // 微信扫码三件套：create 生成二维码 / check 轮询微信长轮询接口 /
+            // openplat 用 wx_code 换酷狗会话（partnerid=36）。
+            ("GET", "/login/wx/create") => login::wx_qr_create(client).await,
+            ("GET", "/login/wx/check") => {
+                let uuid = params.get("uuid").map(|s| s.as_str()).unwrap_or("");
+                login::wx_qr_check(client, uuid).await
+            }
+            ("POST", "/login/openplat") => {
+                let code = params.get("code").map(|s| s.as_str()).unwrap_or("");
+                let resp = login::login_by_openplat(client, "", session, code).await?;
+                self.persist_login(&resp);
+                Ok(resp)
+            }
 
             ("GET", "/search") => {
                 let keyword = params

@@ -51,4 +51,30 @@ void main() {
     expect(prefs.getString('cache_playlist_42'), isNull);
     expect(prefs.getString('cache_artist_42'), isNull);
   });
+
+  test('按用户清理只动该账号的用户级 key，保留其他账号与共享缓存', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'cache_home': '{}',
+      'cache_user_u1': '{}',
+      'cache_user_playlists_u1': '{}',
+      'cache_user_u2': '{}',
+      'cache_user_playlists_u2': '{}',
+      'cache_playlist_42': '{}',
+      'cache_artist_9': '{}',
+    });
+
+    final service = CacheService();
+    await service.clearUserCache('u1');
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('cache_user_u1'), isNull);
+    expect(prefs.getString('cache_user_playlists_u1'), isNull);
+    // 其他账号的用户级缓存不动
+    expect(prefs.getString('cache_user_u2'), isNotNull);
+    expect(prefs.getString('cache_user_playlists_u2'), isNotNull);
+    // 共享内容缓存与匿名缓存不动
+    expect(prefs.getString('cache_playlist_42'), isNotNull);
+    expect(prefs.getString('cache_artist_9'), isNotNull);
+    expect(prefs.getString('cache_home'), isNotNull);
+  });
 }

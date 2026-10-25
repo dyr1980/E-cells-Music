@@ -437,6 +437,9 @@ class MainActivity : AudioServiceActivity() {
                         val alignment = call.argument<String>("alignment")
                         val lyricOffsetMs = (call.argument<Number>("lyricOffsetMs")
                             ?: Long.MIN_VALUE).toLong()
+                        // 光感值（-1f 哨兵 = 未传，不覆盖）
+                        val sensorDarkThreshold = (call.argument<Number>("sensorDarkThreshold")
+                            ?: -1.0).toFloat()
                         withLyricService {
                             it.applySettings(
                                 lightColorIndex,
@@ -448,7 +451,8 @@ class MainActivity : AudioServiceActivity() {
                                 widthPercent,
                                 strokeEnabled,
                                 alignment,
-                                lyricOffsetMs
+                                lyricOffsetMs,
+                                sensorDarkThreshold
                             )
                         }
                         result.success(null)

@@ -371,7 +371,13 @@ class SettingsPage extends StatelessWidget {
     if (confirmed != true || !context.mounted) return;
     await auth.logout();
     if (!context.mounted) return;
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (!auth.isLoggedIn) {
+      // 没有其他已保存账号：回登录页（清掉压在 shell 上的路由）
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } else {
+      // 退出即移除后仍有其他账号：已自动切换到最近使用的，停留设置页
+      Toast.success('已切换到 ${auth.profile?.nickname ?? '其他账号'}');
+    }
   }
 
   Future<void> _claimVipNow(BuildContext context) async {

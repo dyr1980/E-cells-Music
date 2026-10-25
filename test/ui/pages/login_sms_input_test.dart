@@ -39,6 +39,19 @@ class _FakeAuthController extends ChangeNotifier implements AuthController {
 }
 
 class _FakeMusicApi implements MusicApi {
+  // 默认微信 tab 启动即拉码：返回合法 data URI，轮询恒等待保持界面静默。
+  @override
+  Future<QrCodeInfo> createWxLoginQr() async => const QrCodeInfo(
+    key: 'wx_1',
+    imageUrl:
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  );
+
+  @override
+  Future<WxQrCheckResult> checkWxLoginStatus(String uuid) async =>
+      const WxQrCheckResult(wxErrcode: 408);
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -51,9 +64,12 @@ Future<void> _pumpLoginPage(WidgetTester tester) async {
       ),
     ),
   );
-  // 默认短信登录 tab：手机号/验证码输入卡片直接可见
+  await tester.pumpAndSettle();
+  // 默认 tab 是微信扫码；切到手机号登录后输入卡片可见
   //（「手机号登录」既是 tab 标签也是卡片标题，出现两次）。
-  expect(find.text('手机号登录'), findsWidgets);
+  await tester.tap(find.text('手机号登录'));
+  await tester.pumpAndSettle();
+  expect(find.text('手机号登录'), findsNWidgets(2));
 }
 
 void main() {

@@ -63,6 +63,19 @@ class _FakeMusicApi implements MusicApi {
     return checkResult();
   }
 
+  // 默认微信 tab 启动即拉码：返回与酷狗码同规格的 data URI，轮询恒等待。
+  @override
+  Future<QrCodeInfo> createWxLoginQr() async => const QrCodeInfo(
+    key: 'wx_1',
+    imageUrl:
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  );
+
+  @override
+  Future<WxQrCheckResult> checkWxLoginStatus(String uuid) async =>
+      const WxQrCheckResult(wxErrcode: 408);
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -76,8 +89,8 @@ Future<_FakeMusicApi> _pumpLoginPage(WidgetTester tester) async {
       ),
     ),
   );
-  // 切到扫码登录 tab，触发 _loadQrCode。
-  await tester.tap(find.text('扫码登录'));
+  // 默认 tab 是微信扫码；切到酷狗扫码 tab，触发 _loadQrCode。
+  await tester.tap(find.text('酷狗扫码'));
   await tester.pumpAndSettle();
   expect(find.byType(Image), findsOneWidget);
   return api;

@@ -95,8 +95,17 @@ class CacheService {
   }
 
   /// 登出清理：清除用户相关缓存，保留匿名可访问内容（首页 cache_home）。
+  ///
+  /// [userId] 为 null 时全量清除（最后一个账号登出）；非 null 时只清该账号
+  /// 自己的用户级 key（多账号场景下不得动其他账号，也不动
+  /// cache_playlist_{id} 等跨账号共享的内容缓存）。
   Future<void> clearUserCache(String? userId) async {
     final prefs = await SharedPreferences.getInstance();
+    if (userId != null && userId.isNotEmpty) {
+      await prefs.remove('cache_user_$userId');
+      await prefs.remove('cache_user_playlists_$userId');
+      return;
+    }
     final keys = prefs.getKeys().toList();
     for (final key in keys) {
       for (final prefix in _userCachePrefixes) {

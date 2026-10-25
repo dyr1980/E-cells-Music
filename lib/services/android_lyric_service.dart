@@ -53,6 +53,13 @@ class AndroidLyricSettings {
   static const int lyricOffsetMsMax = 2000;
   static const int lyricOffsetStepMs = 50;
 
+  /// 光感模式深色阈值（光感值）范围与步进（lux）：环境亮度 ≤ 该值切深色、
+  /// ≥ 该值×2 切浅色（迟滞防抖，区间内保持原状态）。上限 1000 覆盖
+  /// 白天隧道（几十~几百 lux）时手动调高的需求。
+  static const int sensorDarkThresholdMin = 5;
+  static const int sensorDarkThresholdMax = 1000;
+  static const int sensorDarkThresholdStep = 5;
+
   // 出厂默认（易格同值）：色板索引 0、跟随系统、字号 18、双行、
   // 全宽、无描边、居中、无偏移。
   static const int defaultLightColorIndex = 0;
@@ -64,6 +71,9 @@ class AndroidLyricSettings {
   static const bool defaultStrokeEnabled = false;
   static const String defaultAlignment = AndroidLyricAlignment.center;
   static const int defaultLyricOffsetMs = 0;
+
+  /// 光感值出厂默认（lux），与原生侧改造前的硬编码阈值 15 保持同行为。
+  static const int defaultSensorDarkThreshold = 15;
 
   /// 浅色主题下的歌词色板（与原生 LyricsOverlayService.LIGHT_COLOR_HEX
   /// 逐项一致；仅设置页色块展示用，真正的取色在原生侧按索引完成）。
@@ -99,6 +109,7 @@ class AndroidLyricSettings {
     this.strokeEnabled = defaultStrokeEnabled,
     this.alignment = defaultAlignment,
     this.lyricOffsetMs = defaultLyricOffsetMs,
+    this.sensorDarkThreshold = defaultSensorDarkThreshold,
   });
 
   final int lightColorIndex;
@@ -118,6 +129,10 @@ class AndroidLyricSettings {
   /// 播放位置上，只影响悬浮窗。
   final int lyricOffsetMs;
 
+  /// 光感值（lux）：仅 themeMode 为光感时生效，环境亮度 ≤ 该值切深色
+  /// 歌词、≥ 该值×2 切浅色；浅色阈值由原生侧派生，不单独存储。
+  final int sensorDarkThreshold;
+
   /// 外观恢复出厂默认（设置页「恢复默认」）。锁定是行为状态，不在此
   /// 重置——正在显示的悬浮窗不应因恢复外观而突然解锁。
   AndroidLyricSettings withDefaultAppearance() => copyWith(
@@ -130,6 +145,7 @@ class AndroidLyricSettings {
         strokeEnabled: defaultStrokeEnabled,
         alignment: defaultAlignment,
         lyricOffsetMs: defaultLyricOffsetMs,
+        sensorDarkThreshold: defaultSensorDarkThreshold,
       );
 
   AndroidLyricSettings copyWith({
@@ -143,6 +159,7 @@ class AndroidLyricSettings {
     bool? strokeEnabled,
     String? alignment,
     int? lyricOffsetMs,
+    int? sensorDarkThreshold,
   }) {
     return AndroidLyricSettings(
       lightColorIndex: lightColorIndex ?? this.lightColorIndex,
@@ -155,6 +172,7 @@ class AndroidLyricSettings {
       strokeEnabled: strokeEnabled ?? this.strokeEnabled,
       alignment: alignment ?? this.alignment,
       lyricOffsetMs: lyricOffsetMs ?? this.lyricOffsetMs,
+      sensorDarkThreshold: sensorDarkThreshold ?? this.sensorDarkThreshold,
     );
   }
 
@@ -169,6 +187,7 @@ class AndroidLyricSettings {
         'strokeEnabled': strokeEnabled,
         'alignment': alignment,
         'lyricOffsetMs': lyricOffsetMs,
+        'sensorDarkThreshold': sensorDarkThreshold,
       };
 
   @override
@@ -183,7 +202,8 @@ class AndroidLyricSettings {
       other.widthPercent == widthPercent &&
       other.strokeEnabled == strokeEnabled &&
       other.alignment == alignment &&
-      other.lyricOffsetMs == lyricOffsetMs;
+      other.lyricOffsetMs == lyricOffsetMs &&
+      other.sensorDarkThreshold == sensorDarkThreshold;
 
   @override
   int get hashCode => Object.hash(
@@ -197,6 +217,7 @@ class AndroidLyricSettings {
         strokeEnabled,
         alignment,
         lyricOffsetMs,
+        sensorDarkThreshold,
       );
 
   factory AndroidLyricSettings.fromMap(Map<String, dynamic> map) {
@@ -223,6 +244,10 @@ class AndroidLyricSettings {
       lyricOffsetMs:
           ((map['lyricOffsetMs'] as num?)?.toInt() ?? defaultLyricOffsetMs)
               .clamp(lyricOffsetMsMin, lyricOffsetMsMax),
+      // 旧版本 JSON 无此键：缺省回落默认值，行为与升级前一致
+      sensorDarkThreshold: ((map['sensorDarkThreshold'] as num?)?.toInt() ??
+              defaultSensorDarkThreshold)
+          .clamp(sensorDarkThresholdMin, sensorDarkThresholdMax),
     );
   }
 }

@@ -11,6 +11,20 @@ import 'package:shiyin_music/ui/pages/login_page.dart';
 import 'package:shiyin_music/ui/pages/player_page.dart';
 
 class _FakeMusicApi implements MusicApi {
+  // 登录页默认微信 tab 启动即拉码：返回合法 data URI，轮询恒等待，
+  // 避免启动即弹错误对话框遮挡窗口控制浮层。
+  @override
+  Future<QrCodeInfo> createWxLoginQr() async => const QrCodeInfo(
+    key: 'wx_1',
+    imageUrl:
+        'data:image/png;base64,'
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  );
+
+  @override
+  Future<WxQrCheckResult> checkWxLoginStatus(String uuid) async =>
+      const WxQrCheckResult(wxErrcode: 408);
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

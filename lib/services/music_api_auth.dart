@@ -102,6 +102,36 @@ mixin _MusicApiAuth on _MusicApiBase {
     return QrCheckResult.fromJson(json);
   }
 
+  /// 生成微信登录二维码：返回 uuid（作 key）与 base64 二维码（data URI）。
+  Future<QrCodeInfo> createWxLoginQr() async {
+    final json = asMap(await _client.get('/login/wx/create'));
+    if (asInt(json['status']) != 1 || asInt(json['errcode']) != 0) {
+      throw ApiException('获取微信二维码失败${_failureSuffix(json)}');
+    }
+    return QrCodeInfo(
+      key: asString(json['uuid']) ?? '',
+      imageUrl: asString(json['qrcode_img']) ?? '',
+    );
+  }
+
+  /// 轮询微信扫码状态（wx_errcode 语义见 [WxQrCheckResult]）。
+  Future<WxQrCheckResult> checkWxLoginStatus(String uuid) async {
+    final json = asMap(await _client.get('/login/wx/check', {'uuid': uuid}));
+    return WxQrCheckResult.fromJson(json);
+  }
+
+  /// 微信扫码确认后的最终一步：wx_code 换酷狗会话（token/userid/t1）。
+  /// wx_code 单次有效——本调用失败后必须整段重新拉码，不能只重试本方法。
+  Future<LoginSession> loginByWxOpenplat(String code) async {
+    final json = asMap(
+      await _client.post('/login/openplat', body: {'code': code}),
+    );
+    if (!_isSuccess(json)) {
+      throw ApiException('微信登录失败${_failureSuffix(json)}');
+    }
+    return LoginSession.fromJson(json);
+  }
+
   Future<UserProfile> userDetail() async {
     final json = asMap(await _client.get('/user/detail'));
     return UserProfile.fromJson(json);

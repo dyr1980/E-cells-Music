@@ -35,8 +35,14 @@ class AuthController extends ChangeNotifier {
   static const _userIdKey = 'shiyin_user_id';
   static const _playlistCachePrefix = 'shiyin_cached_playlists';
   static const _playlistEmptyCountPrefix = 'shiyin_playlist_empty_count';
-  static const _likedHashesKey = 'shiyin_liked_hashes';
-  static const _likedFileIdsKey = 'shiyin_liked_fileids';
+  // 多账号：本机已保存账号列表（JSON，按 lastUsedAt 降序）。
+  static const _savedAccountsKey = 'shiyin_saved_accounts';
+  // 红心集合按用户隔离（多账号切换不得串号）。旧全局 key 仅在 restore
+  // 直系恢复时做一次性迁移读取，迁移后删除。
+  static const _likedHashesPrefix = 'shiyin_liked_hashes';
+  static const _likedFileIdsPrefix = 'shiyin_liked_fileids';
+  static const _legacyLikedHashesKey = 'shiyin_liked_hashes';
+  static const _legacyLikedFileIdsKey = 'shiyin_liked_fileids';
   final MusicApi _api;
   final CacheService _cacheService;
   late final VipBackgroundTask _vipBackgroundTask = VipBackgroundTask(_api);
@@ -51,6 +57,9 @@ class AuthController extends ChangeNotifier {
   UserProfile? profile;
   UserVipInfo? vipInfo;
   List<PlaylistSummary> playlists = const [];
+
+  /// 本机已保存账号，按 lastUsedAt 降序（首个即最近使用）。
+  List<SavedAccount> savedAccounts = const [];
 
   final Set<String> _likedHashes = {};
   final Map<String, int> _hashToFileId = {};
@@ -237,11 +246,12 @@ class AuthController extends ChangeNotifier {
   }
 
   List<PlaylistSummary> get createdPlaylists {
+    // 「默认收藏」(is_def=1) 为系统歌单：0 首且不可删除，不展示在
+    // 「我创建的歌单」（对齐原易格 isDefault!==true && name!=='默认收藏' 过滤）。
+    // isCreatedPlaylist 已对其返回 false，collectedPlaylists 亦排除。
     return playlists
         .where(
-          (playlist) =>
-              !playlist.isCollectedAlbum &&
-              (playlist.isCreatedPlaylist || playlist.isSystemDefaultCollect),
+          (playlist) => !playlist.isCollectedAlbum && playlist.isCreatedPlaylist,
         )
         .toList();
   }
@@ -443,16 +453,31 @@ class AuthController extends ChangeNotifier {
   Future<void> restore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await _loadSavedAccounts();
       final storedUserId = prefs.getString(_userIdKey);
-      final restored = LoginSession(
+      var restored = LoginSession(
         userId: storedUserId,
         token: prefs.getString(_tokenKey),
         t1: prefs.getString(_t1Key),
         sessionId: prefs.getString(_sessionIdKey),
       );
 
+      // 旧全局红心键只允许「直系恢复存储会话」这一条路径迁移——
+      // 保存列表回退路径无法认定其归属（可能属于任意账号），不迁移。
+      var allowLegacyLiked = true;
+
       if (!restored.isValid) {
-        return;
+        // 存储会话无效但本机还有已保存账号（如异常退出留下的残缺凭证）：
+        // 回退到最近使用的账号，写回活动键后走同一恢复流程。
+        if (savedAccounts.isEmpty) {
+          return;
+        }
+        restored = savedAccounts.first.toLoginSession();
+        allowLegacyLiked = false;
+        await prefs.setString(_tokenKey, restored.token ?? '');
+        await prefs.setString(_t1Key, restored.t1 ?? '');
+        await prefs.setString(_sessionIdKey, restored.sessionId ?? '');
+        await prefs.setString(_userIdKey, restored.userId ?? '');
       }
 
       session = restored;
@@ -460,11 +485,17 @@ class AuthController extends ChangeNotifier {
 
       try {
         final refreshed = await _api.refreshToken();
-        if (storedUserId != null &&
+        final restoringId = restored.userId;
+        if (restoringId != null &&
+            restoringId.isNotEmpty &&
             refreshed.userId != null &&
-            storedUserId != refreshed.userId) {
-          await _clearSession();
-          return;
+            restoringId != refreshed.userId) {
+          // 记录身份与 token 实际归属不一致（历史脏数据/账本串号）：token
+          // 本身仍有效，以刷新结果为准继续使用；只清掉旧记录身份的保存
+          // 项与用户级数据，避免脏缓存串号。旧版的全量清号在多账号下会把
+          // 其他账号一并踢下线，不再采用。
+          await _removeSavedAccountEntry(restoringId);
+          await _clearUserData(restoringId);
         }
         session = refreshed;
         _api.setSession(refreshed);
@@ -476,7 +507,7 @@ class AuthController extends ChangeNotifier {
       }
 
       playlists = await _loadCachedPlaylists();
-      await _loadLikedHashes();
+      await _loadLikedHashes(allowLegacyMigration: allowLegacyLiked);
       // 先读缓存的用户信息，静默刷新由 refreshProfile 完成
       final cachedProfile = await _cacheService.read<UserProfile>(
         _userCacheKey,
@@ -485,6 +516,11 @@ class AuthController extends ChangeNotifier {
       );
       if (cachedProfile != null) {
         profile = cachedProfile.data;
+      }
+      // 存量单账号用户首次升级：恢复成功即进入保存列表（离线也入列，
+      // 昵称头像待联网后由 refreshProfile 补全）。
+      if (session != null) {
+        await _upsertSavedAccount(session!);
       }
       // 缓存数据已就绪，立即通知 UI 显示，API 刷新在后台进行
       isRestoring = false;
@@ -545,8 +581,26 @@ class AuthController extends ChangeNotifier {
     await _run(() => _api.sendLoginCode(mobile));
   }
 
-  Future<void> loginWithSession(LoginSession session) async {
+  /// 登录/切换统一入口。
+  ///
+  /// [forceRefresh] = true（账号切换）时无论 t1 是否为空都先调一次
+  /// /login/token：与 [restore] 行为对齐——Rust 侧 kg_session.json 由
+  /// setSession 整体替换后 vip_type/vip_token 为空，需借登录类响应的
+  /// persist_login 补回；失败沿用原 catch 容忍，继续用存储 token。
+  Future<void> loginWithSession(
+    LoginSession session, {
+    bool forceRefresh = false,
+  }) async {
     await _run(() async {
+      // 多账号切换/添加账号：先排空上一账号仍在收藏互斥链上的写操作
+      // （否则旧账号在途的增删红心会打向新账号的服务端歌单），再重置
+      // 上一账号的内存态，避免旧资料/歌单/红心串号到新账号。
+      await _likedMutationLock;
+      vipInfo = null;
+      playlists = const [];
+      _likedHashes.clear();
+      _hashToFileId.clear();
+
       this.session = session;
       _api.setSession(session);
 
@@ -561,7 +615,7 @@ class AuthController extends ChangeNotifier {
       // 扫码登录返回的 QrLoginStatusResponse 只有 token，缺少 t1。
       // 后续 /user/detail 等接口需要 t1 header 鉴权，否则会失败导致
       // profile/歌单拉取不到。这里先调 /login/token 刷新拿到 t1。
-      if (session.t1 == null || session.t1!.isEmpty) {
+      if (forceRefresh || session.t1 == null || session.t1!.isEmpty) {
         try {
           final refreshed = await _api.refreshToken();
           if (refreshed.token != null && refreshed.token!.isNotEmpty) {
@@ -595,6 +649,9 @@ class AuthController extends ChangeNotifier {
         );
       }
 
+      // 登录/切换成功即进入保存列表（refreshProfile 内再用真实资料补全）
+      await _upsertSavedAccount(this.session!);
+
       await refreshProfile(silent: true);
       _vipBackgroundTask.schedule(session);
     });
@@ -607,7 +664,10 @@ class AuthController extends ChangeNotifier {
   }) async {
     PhoneLoginResult? result;
     await _run(() async {
-      _api.setSession(null);
+      // 添加账号模式（已有会话）不得清空客户端会话：短信登录失败/要求
+      // 选择账号时，当前账号必须原样可用；未登录时客户端本就无会话，
+      // 等价于原来的 setSession(null)。
+      if (session == null) _api.setSession(null);
       result = await _api.loginWithPhone(
         mobile: mobile,
         code: code,
@@ -617,6 +677,14 @@ class AuthController extends ChangeNotifier {
         return;
       }
       final nextSession = result!.session!;
+      // 与 loginWithSession 相同的切换隔离：排空旧账号在途红心写、重置
+      // 旧账号内存态。仅在确认拿到新会话后执行——失败/要求选择账号的
+      // 路径不得动当前账号的内存态（否则当前账号界面瞬间空白）。
+      await _likedMutationLock;
+      vipInfo = null;
+      playlists = const [];
+      _likedHashes.clear();
+      _hashToFileId.clear();
       session = nextSession;
       _api.setSession(nextSession);
 
@@ -627,6 +695,7 @@ class AuthController extends ChangeNotifier {
       await prefs.setString(_sessionIdKey, _api.clientSessionId ?? '');
       await prefs.setString(_userIdKey, nextSession.userId ?? '');
 
+      await _upsertSavedAccount(nextSession);
       await refreshProfile(silent: true);
       _vipBackgroundTask.schedule(session);
     });
@@ -650,34 +719,74 @@ class AuthController extends ChangeNotifier {
       }
       playlists = await _loadUserPlaylistsWithCache();
       await _syncLikedSongs();
+      // 已登录时顺手用真实资料补全保存列表条目（昵称/头像/最近使用时间）
+      final uid = session?.userId;
+      if (uid != null && uid.isNotEmpty && session != null) {
+        await _upsertSavedAccount(session!, profile: profile);
+      }
     }, silent: silent);
   }
 
-  Future<void> logout() async {
+  /// 切换到已保存账号。
+  ///
+  /// 目标不存在 / 正在忙（登录、恢复、其他切换在途）/ 已是当前账号时
+  /// 返回 false。返回 true 表示当前会话已切到目标账号——资料拉取失败也
+  /// 算切换完成（错误细节见 [errorMessage]，由 UI 决定如何提示；目标
+  /// token 彻底失效时可先移除再重新登录）。
+  Future<bool> switchAccount(String userId) async {
+    if (isLoading || isRestoring) return false;
+    if (session?.userId == userId) return false;
+    final target = _findSavedAccount(userId);
+    if (target == null) return false;
+    await loginWithSession(target.toLoginSession(), forceRefresh: true);
+    return session?.userId == userId;
+  }
+
+  /// 从本机移除已保存账号（「退出即移除」的移除版）：
+  /// - 非当前账号：仅从列表移除；
+  /// - 当前账号：尽力服务端登出（失败不阻断本地移除）+ 只清该账号的
+  ///   用户级数据（不动其他账号）；还有其他账号则自动切到最近使用的，
+  ///   否则走完整登出（回登录页）。
+  Future<void> removeAccount(String userId) async {
     await _run(() async {
+      final isCurrent = session?.userId == userId;
+      await _removeSavedAccountEntry(userId);
+      if (!isCurrent) {
+        notifyListeners();
+        return;
+      }
       try {
         await _api.logout();
-      } finally {
-        final prefs = await SharedPreferences.getInstance();
-        final cacheKey = _playlistCacheKey;
-        final emptyCountKey = _playlistEmptyCountKey;
-        session = null;
-        profile = null;
-        vipInfo = null;
-        playlists = const [];
-        _likedHashes.clear();
-        _hashToFileId.clear();
-        _api.setSession(null);
-        await prefs.remove(_tokenKey);
-        await prefs.remove(_t1Key);
-        await prefs.remove(_sessionIdKey);
-        await prefs.remove(_userIdKey);
-        await prefs.remove(cacheKey);
-        await prefs.remove(emptyCountKey);
-        await prefs.remove(_likedHashesKey);
-        await prefs.remove(_likedFileIdsKey);
-        await _clearSession();
+      } catch (_) {}
+      await _clearUserData(userId);
+      if (savedAccounts.isNotEmpty) {
+        await _switchToMostRecentSaved();
+        return;
       }
+      await _fullLocalLogout();
+    });
+  }
+
+  /// 退出登录（退出即移除）：从本机移除当前账号凭证；若还有其他已保存
+  /// 账号则自动切换到最近使用的（不抛服务端登出错误，避免误报），否则
+  /// 走完整本地登出（服务端登出错误保留原有抛出语义）。
+  Future<void> logout() async {
+    await _run(() async {
+      Object? serverError;
+      try {
+        await _api.logout();
+      } catch (error) {
+        serverError = error;
+      }
+      await _removeSavedAccountEntry(session?.userId);
+      if (savedAccounts.isNotEmpty) {
+        await _switchToMostRecentSaved();
+        return;
+      }
+      if (serverError != null) {
+        throw serverError;
+      }
+      await _fullLocalLogout();
     });
   }
 
@@ -759,7 +868,13 @@ class AuthController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _loadLikedHashes() async {
+  /// 加载当前账号的红心集合（按用户键）。
+  ///
+  /// [allowLegacyMigration]：旧版本红心存在全局键（无用户后缀）。仅
+  /// restore 直系恢复存储会话的路径允许一次性迁移——读取全局键、按用户
+  /// 键回写、删除全局键；其余路径（登录/切换/回退）红心恒由服务端全量
+  /// 同步重建，不读全局键（无法认定归属，避免串号给别的账号）。
+  Future<void> _loadLikedHashes({bool allowLegacyMigration = false}) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_likedHashesKey);
     if (raw != null && raw.isNotEmpty) {
@@ -788,6 +903,39 @@ class AuthController extends ChangeNotifier {
         }
       } catch (_) {}
     }
+
+    if (!allowLegacyMigration) return;
+    // 一次性迁移：按用户键已有数据则以新键为准（全局键仅作缺位兜底）
+    final legacyRaw = prefs.getString(_legacyLikedHashesKey);
+    final legacyIds = prefs.getString(_legacyLikedFileIdsKey);
+    if (legacyRaw == null && legacyIds == null) return;
+    if (raw == null || raw.isEmpty) {
+      try {
+        final list = jsonDecode(legacyRaw ?? '[]');
+        if (list is List) {
+          _likedHashes.addAll(list.whereType<String>());
+        }
+      } catch (_) {}
+    }
+    if (rawIds == null || rawIds.isEmpty) {
+      try {
+        final map = jsonDecode(legacyIds ?? '{}');
+        if (map is Map) {
+          map.forEach((key, value) {
+            if (key is! String || key.isEmpty) return;
+            if (value is int && value != 0) {
+              _hashToFileId[key] = value;
+            } else if (value is String) {
+              final parsed = int.tryParse(value);
+              if (parsed != null && parsed != 0) _hashToFileId[key] = parsed;
+            }
+          });
+        }
+      } catch (_) {}
+    }
+    await _persistLikedHashes();
+    await prefs.remove(_legacyLikedHashesKey);
+    await prefs.remove(_legacyLikedFileIdsKey);
   }
 
   Future<List<PlaylistSummary>> _loadUserPlaylistsWithCache() async {
@@ -869,13 +1017,160 @@ class AuthController extends ChangeNotifier {
     return '${_playlistEmptyCountPrefix}_${session?.userId ?? 'default'}';
   }
 
+  String get _likedHashesKey =>
+      '${_likedHashesPrefix}_${session?.userId ?? 'default'}';
+
+  String get _likedFileIdsKey =>
+      '${_likedFileIdsPrefix}_${session?.userId ?? 'default'}';
+
   String get _userCacheKey => 'cache_user_${session?.userId ?? 'default'}';
 
   String get _playlistCacheKeyV2 =>
       'cache_user_playlists_${session?.userId ?? 'default'}';
 
+  // ===== 多账号：保存列表的读写与维护 =====
+
+  /// 读取本机保存账号列表：丢弃无效条目、按 userId 去重（保留 lastUsedAt
+  /// 较新者）、按 lastUsedAt 降序（首个即最近使用）。
+  Future<void> _loadSavedAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_savedAccountsKey);
+    if (raw == null || raw.isEmpty) {
+      savedAccounts = const [];
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        savedAccounts = const [];
+        return;
+      }
+      final byUid = <String, SavedAccount>{};
+      for (final item in decoded.whereType<Map>()) {
+        final account = SavedAccount.fromJson(asMap(item));
+        if (!account.isValid) continue;
+        final existing = byUid[account.userId];
+        if (existing == null || account.lastUsedAt >= existing.lastUsedAt) {
+          byUid[account.userId] = account;
+        }
+      }
+      savedAccounts = byUid.values.toList()
+        ..sort((a, b) => b.lastUsedAt.compareTo(a.lastUsedAt));
+    } catch (_) {
+      // 列表损坏按空处理，不阻断启动
+      savedAccounts = const [];
+    }
+  }
+
+  Future<void> _persistSavedAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _savedAccountsKey,
+      jsonEncode(savedAccounts.map((a) => a.toJson()).toList()),
+    );
+  }
+
+  SavedAccount? _findSavedAccount(String userId) {
+    for (final account in savedAccounts) {
+      if (account.userId == userId) return account;
+    }
+    return null;
+  }
+
+  /// 登录/切换成功后写入保存列表（按 userId 合并）：
+  /// 凭据（token/t1/sessionId）与 lastUsedAt 恒取会话新值；昵称/头像取
+  /// [profile] ?? session 的非空值（refreshProfile 后用真实资料补全），
+  /// 否则保留条目旧值。userId 为空的会话（理论上不存在）跳过。
+  Future<void> _upsertSavedAccount(
+    LoginSession session, {
+    UserProfile? profile,
+  }) async {
+    final uid = session.userId?.trim() ?? '';
+    if (uid.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final old = _findSavedAccount(uid);
+    final nickname = (profile?.nickname ?? session.nickname)?.trim();
+    final avatarUrl = profile?.avatarUrl ?? session.avatarUrl;
+    final merged = SavedAccount(
+      userId: uid,
+      nickname: nickname?.isNotEmpty == true ? nickname : old?.nickname,
+      avatarUrl:
+          avatarUrl?.isNotEmpty == true ? avatarUrl : old?.avatarUrl,
+      token: session.token ?? old?.token,
+      t1: session.t1 ?? old?.t1,
+      sessionId: session.sessionId ?? old?.sessionId,
+      lastUsedAt: now,
+    );
+    savedAccounts = [...savedAccounts.where((a) => a.userId != uid), merged]
+      ..sort((a, b) => b.lastUsedAt.compareTo(a.lastUsedAt));
+    await _persistSavedAccounts();
+  }
+
+  Future<void> _removeSavedAccountEntry(String? userId) async {
+    final uid = userId?.trim();
+    if (uid == null || uid.isEmpty) return;
+    savedAccounts = savedAccounts.where((a) => a.userId != uid).toList();
+    await _persistSavedAccounts();
+  }
+
+  /// 清理单个账号的用户级数据（按参数 uid 构键，不依赖当前 session——
+  /// 移除的可能不是当前账号）：歌单缓存旧键、空计数、按用户红心键、
+  /// CacheService 用户级缓存。共享内容缓存（cache_playlist_{id} 等）不动。
+  Future<void> _clearUserData(String? userId) async {
+    final uid = (userId != null && userId.isNotEmpty) ? userId : 'default';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('${_playlistCachePrefix}_$uid');
+    await prefs.remove('${_playlistEmptyCountPrefix}_$uid');
+    await prefs.remove('${_likedHashesPrefix}_$uid');
+    await prefs.remove('${_likedFileIdsPrefix}_$uid');
+    await _cacheService.clearUserCache(uid);
+  }
+
+  /// 切到最近使用的已保存账号（登出/移除当前账号后仍有剩余时）。
+  Future<void> _switchToMostRecentSaved() async {
+    if (savedAccounts.isEmpty) return;
+    await loginWithSession(
+      savedAccounts.first.toLoginSession(),
+      forceRefresh: true,
+    );
+  }
+
+  /// 完整本地登出：清会话状态、4 个活动键、当前账号用户级数据与全部
+  /// 用户缓存前缀（最后一个账号离场，全量清理兜底）。
+  Future<void> _fullLocalLogout() async {
+    // 先捕获 uid 与按用户键——清空 session 后 getter 会退到 'default'
+    final uid = session?.userId;
+    final playlistCacheKey = _playlistCacheKey;
+    final playlistEmptyCountKey = _playlistEmptyCountKey;
+    final likedHashesKey = _likedHashesKey;
+    final likedFileIdsKey = _likedFileIdsKey;
+    session = null;
+    profile = null;
+    vipInfo = null;
+    playlists = const [];
+    _likedHashes.clear();
+    _hashToFileId.clear();
+    _api.setSession(null);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
+    await prefs.remove(_t1Key);
+    await prefs.remove(_sessionIdKey);
+    await prefs.remove(_userIdKey);
+    await prefs.remove(playlistCacheKey);
+    await prefs.remove(playlistEmptyCountKey);
+    await prefs.remove(likedHashesKey);
+    await prefs.remove(likedFileIdsKey);
+    await _clearUserData(uid);
+    await _clearSession();
+  }
+
   Future<void> _clearSession() async {
     final prefs = await SharedPreferences.getInstance();
+    // 按用户键先捕获——session 置空后 getter 会退到 'default' 后缀
+    final playlistCacheKey = _playlistCacheKey;
+    final playlistEmptyCountKey = _playlistEmptyCountKey;
+    final likedHashesKey = _likedHashesKey;
+    final likedFileIdsKey = _likedFileIdsKey;
     session = null;
     profile = null;
     playlists = const [];
@@ -886,10 +1181,13 @@ class AuthController extends ChangeNotifier {
     await prefs.remove(_t1Key);
     await prefs.remove(_sessionIdKey);
     await prefs.remove(_userIdKey);
-    await prefs.remove(_playlistCacheKey);
-    await prefs.remove(_playlistEmptyCountKey);
-    await prefs.remove(_likedHashesKey);
-    await prefs.remove(_likedFileIdsKey);
+    await prefs.remove(playlistCacheKey);
+    await prefs.remove(playlistEmptyCountKey);
+    await prefs.remove(likedHashesKey);
+    await prefs.remove(likedFileIdsKey);
+    // 旧全局红心键一并清除，防止迁移残留
+    await prefs.remove(_legacyLikedHashesKey);
+    await prefs.remove(_legacyLikedFileIdsKey);
     await _cacheService.clearUserCache(null);
     notifyListeners();
   }
