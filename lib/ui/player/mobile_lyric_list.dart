@@ -27,6 +27,8 @@ class MobileLyricList extends StatefulWidget {
     required this.showRomanization,
     required this.lyricScale,
     required this.isPageVisible,
+    this.textAlign = TextAlign.left,
+    this.rowCrossAxisAlignment = CrossAxisAlignment.start,
     this.onLongPressLine,
   });
 
@@ -38,6 +40,12 @@ class MobileLyricList extends StatefulWidget {
   final bool showRomanization;
   final double lyricScale;
   final bool isPageVisible;
+
+  /// 歌词对齐方式：主行 / 翻译行 / 音译行的 [Text] 对齐（换行长句一致）。
+  final TextAlign textAlign;
+
+  /// 歌词行 Column（主行 + 翻译/音译）的交叉轴对齐，与 [textAlign] 配套。
+  final CrossAxisAlignment rowCrossAxisAlignment;
 
   /// 长按歌词行（打开「调整歌词进度」弹层；与详情弹层入口同一个）。
   final VoidCallback? onLongPressLine;
@@ -516,13 +524,13 @@ class _MobileLyricListState extends State<MobileLyricList>
                         active: true,
                         position: _smoothPosition,
                         styleOverride: mainTextStyle,
-                        textAlign: TextAlign.start,
+                        textAlign: widget.textAlign,
                       );
                     } else {
                       mainWidget = AnimatedDefaultTextStyle(
                         duration: const Duration(milliseconds: 180),
                         style: mainTextStyle,
-                        child: Text(line.text),
+                        child: Text(line.text, textAlign: widget.textAlign),
                       );
                     }
 
@@ -558,13 +566,14 @@ class _MobileLyricListState extends State<MobileLyricList>
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8.5),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: widget.rowCrossAxisAlignment,
                           children: [
                             mainWidget,
                             if (showTrans) ...[
                               const SizedBox(height: 4),
                               Text(
                                 line.translation!,
+                                textAlign: widget.textAlign,
                                 style: TextStyle(
                                   color: transColor,
                                   fontSize: 14.5 * widget.lyricScale,
@@ -577,6 +586,7 @@ class _MobileLyricListState extends State<MobileLyricList>
                               const SizedBox(height: 3),
                               Text(
                                 line.romanization!,
+                                textAlign: widget.textAlign,
                                 style: TextStyle(
                                   color: romColor,
                                   fontSize: 13.5 * widget.lyricScale,

@@ -9,6 +9,7 @@ import '../../models/music_models.dart';
 import '../form_factor.dart';
 import '../widgets/song_action_sheets.dart' show toggleLikeWithFeedback;
 import 'desktop_lyric_list.dart';
+import 'lyric_alignment.dart';
 import 'lyric_bottom_bar.dart';
 import 'lyric_display_mode.dart';
 import 'lyric_offset_sheet.dart';
@@ -46,10 +47,12 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
   static const _lyricScaleKey = 'settings.lyric_scale';
   static const _showTranslationKey = kLyricShowTranslationPrefKey;
   static const _showRomanizationKey = kLyricShowRomanizationPrefKey;
+  static const _lyricAlignmentKey = kLyricAlignmentPrefKey;
 
   double _lyricScale = 1.0;
   bool _showTranslation = true;
   bool _showRomanization = false;
+  LyricAlignment _lyricAlignment = LyricAlignment.left;
 
   @override
   void initState() {
@@ -66,6 +69,9 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
         _lyricScale = prefs.getDouble(_lyricScaleKey) ?? 1.0;
         _showTranslation = prefs.getBool(_showTranslationKey) ?? true;
         _showRomanization = prefs.getBool(_showRomanizationKey) ?? false;
+        _lyricAlignment = LyricAlignment.fromPref(
+          prefs.getString(_lyricAlignmentKey),
+        );
       });
     }
   }
@@ -75,6 +81,13 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
     setState(() => _lyricScale = clamped);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_lyricScaleKey, clamped);
+  }
+
+  Future<void> _setLyricAlignment(LyricAlignment alignment) async {
+    if (alignment == _lyricAlignment) return;
+    setState(() => _lyricAlignment = alignment);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lyricAlignmentKey, alignment.prefValue);
   }
 
   Future<void> _setShowTranslation(bool show) async {
@@ -285,6 +298,8 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
               showTranslation: _showTranslation,
               showRomanization: _showRomanization,
               lyricScale: _lyricScale,
+              textAlign: _lyricAlignment.textAlign,
+              rowCrossAxisAlignment: _lyricAlignment.crossAxisAlignment,
               isPageVisible: widget.isPageVisible,
               onLongPressLine: openLyricOffsetSheet,
             ),
@@ -298,10 +313,12 @@ class _LyricPlayerPageState extends State<LyricPlayerPage>
           hasTranslation: hasTranslation,
           hasRomanization: hasRomanization,
           lyricScale: _lyricScale,
+          alignment: _lyricAlignment,
           showSkipButtons: widget.player.lyricPageSkipButtonsEnabled,
           onToggleTranslation: _setShowTranslation,
           onToggleRomanization: _setShowRomanization,
           onLyricScaleChanged: _setLyricScale,
+          onAlignmentChanged: _setLyricAlignment,
         ),
       ],
     );

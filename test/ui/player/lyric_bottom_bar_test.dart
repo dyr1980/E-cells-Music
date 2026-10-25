@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shiyin_music/controllers/player_controller.dart';
 import 'package:shiyin_music/models/music_models.dart';
+import 'package:shiyin_music/ui/player/lyric_alignment.dart';
 import 'package:shiyin_music/ui/player/lyric_bottom_bar.dart';
 
 class _FakePlayerController extends ChangeNotifier implements PlayerController {
@@ -352,6 +353,83 @@ void main() {
       expect(play.left - roman.right, 14.0);
       expect(find.byKey(const ValueKey('lyric_previous_button')), findsNothing);
       expect(find.byKey(const ValueKey('lyric_next_button')), findsNothing);
+    });
+
+    testWidgets('「词」弹层：对齐方式选择回调与选中态联动', (tester) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
+      final player = _FakePlayerController();
+      final alignments = <LyricAlignment>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricBottomBar(
+              player: player,
+              song: song,
+              showTranslation: false,
+              showRomanization: false,
+              hasTranslation: false,
+              hasRomanization: false,
+              lyricScale: 1.0,
+              alignment: LyricAlignment.left,
+              onToggleTranslation: (_) {},
+              onToggleRomanization: (_) {},
+              onLyricScaleChanged: (_) {},
+              onAlignmentChanged: alignments.add,
+            ),
+          ),
+        ),
+      );
+
+      // 打开「词」弹层
+      await tester.tap(find.text('词'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('歌词样式'), findsOneWidget);
+      expect(find.text('对齐方式'), findsOneWidget);
+      expect(find.text('左对齐'), findsOneWidget);
+      expect(find.text('居中'), findsOneWidget);
+      expect(find.text('右对齐'), findsOneWidget);
+
+      // 选「居中」→ 回调收到 center，选中态切换
+      await tester.tap(find.text('居中'));
+      await tester.pumpAndSettle();
+      expect(alignments, [LyricAlignment.center]);
+
+      // 「恢复默认」→ 字号与对齐一并复位
+      await tester.tap(find.text('恢复默认'));
+      await tester.pumpAndSettle();
+      expect(alignments, [LyricAlignment.center, LyricAlignment.left]);
+    });
+
+    testWidgets('未提供对齐回调时弹层不展示对齐节（兼容）', (tester) async {
+      const song = Song(id: 's1', hash: 'h1', title: 'Song', artist: 'Artist');
+      final player = _FakePlayerController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LyricBottomBar(
+              player: player,
+              song: song,
+              showTranslation: false,
+              showRomanization: false,
+              hasTranslation: false,
+              hasRomanization: false,
+              lyricScale: 1.0,
+              onToggleTranslation: (_) {},
+              onToggleRomanization: (_) {},
+              onLyricScaleChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('词'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('对齐方式'), findsNothing);
+      expect(find.text('左对齐'), findsNothing);
     });
   });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../controllers/player_controller.dart';
 import '../../models/music_models.dart';
+import 'lyric_alignment.dart';
 import 'player_comment_button.dart';
 
 /// QQ 音乐风格带 `on` / `off` 状态角标的药丸按键。
@@ -90,7 +91,7 @@ class _LyricSettingsPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '调节歌词字号',
+      message: '歌词字号与对齐',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
@@ -230,8 +231,10 @@ class LyricBottomBar extends StatelessWidget {
     required this.onToggleTranslation,
     required this.onToggleRomanization,
     required this.onLyricScaleChanged,
+    this.alignment = LyricAlignment.left,
     this.showSkipButtons = false,
     this.onOpenComment,
+    this.onAlignmentChanged,
   });
 
   final PlayerController player;
@@ -245,6 +248,11 @@ class LyricBottomBar extends StatelessWidget {
   final ValueChanged<bool> onToggleTranslation;
   final ValueChanged<bool> onToggleRomanization;
   final ValueChanged<double> onLyricScaleChanged;
+
+  /// 歌词对齐方式；[onAlignmentChanged] 缺省时弹层不展示对齐选择节
+  /// （兼容无需对齐能力的调用方）。
+  final LyricAlignment alignment;
+  final ValueChanged<LyricAlignment>? onAlignmentChanged;
   final ValueChanged<String>? onOpenComment;
 
   void _showFontSizeSheet(BuildContext context) {
@@ -253,7 +261,9 @@ class LyricBottomBar extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => _LyricFontSizeSheet(
         initialScale: lyricScale,
+        initialAlignment: alignment,
         onChanged: onLyricScaleChanged,
+        onAlignmentChanged: onAlignmentChanged,
       ),
     );
   }
@@ -368,10 +378,16 @@ class _LyricFontSizeSheet extends StatefulWidget {
   const _LyricFontSizeSheet({
     required this.initialScale,
     required this.onChanged,
+    this.initialAlignment = LyricAlignment.left,
+    this.onAlignmentChanged,
   });
 
   final double initialScale;
+  final LyricAlignment initialAlignment;
   final ValueChanged<double> onChanged;
+
+  /// 非空时展示对齐方式选择节。
+  final ValueChanged<LyricAlignment>? onAlignmentChanged;
 
   @override
   State<_LyricFontSizeSheet> createState() => _LyricFontSizeSheetState();
@@ -379,11 +395,13 @@ class _LyricFontSizeSheet extends StatefulWidget {
 
 class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
   late double _scale;
+  late LyricAlignment _alignment;
 
   @override
   void initState() {
     super.initState();
     _scale = widget.initialScale;
+    _alignment = widget.initialAlignment;
   }
 
   void _update(double newScale) {
@@ -392,8 +410,14 @@ class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
     widget.onChanged(clamped);
   }
 
+  void _updateAlignment(LyricAlignment alignment) {
+    setState(() => _alignment = alignment);
+    widget.onAlignmentChanged?.call(alignment);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final showAlignment = widget.onAlignmentChanged != null;
     return SafeArea(
       child: Container(
         margin: const EdgeInsets.all(16),
@@ -422,7 +446,7 @@ class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
                 ),
                 const SizedBox(width: 8),
                 const Text(
-                  '歌词字体大小',
+                  '歌词样式',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -431,7 +455,10 @@ class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => _update(1.0),
+                  onPressed: () {
+                    _update(1.0);
+                    _updateAlignment(LyricAlignment.left);
+                  },
                   child: Text(
                     '恢复默认',
                     style: TextStyle(
@@ -477,7 +504,95 @@ class _LyricFontSizeSheetState extends State<_LyricFontSizeSheet> {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            // 对齐方式选择（调用方未提供回调时不展示）
+            if (showAlignment) ...[
+              Divider(
+                height: 28,
+                color: Colors.white.withValues(alpha: 0.10),
+              ),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.format_align_center_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '对齐方式',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  for (final alignment in LyricAlignment.values) ...[
+                    if (alignment != LyricAlignment.values.first)
+                      const SizedBox(width: 10),
+                    Expanded(
+                      child: _AlignmentOptionTile(
+                        alignment: alignment,
+                        selected: alignment == _alignment,
+                        onTap: () => _updateAlignment(alignment),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 对齐方式选项瓦片：选中态复用底栏药丸的视觉语言（白描边 + 微底色）。
+class _AlignmentOptionTile extends StatelessWidget {
+  const _AlignmentOptionTile({
+    required this.alignment,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final LyricAlignment alignment;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected
+        ? Colors.white
+        : Colors.white.withValues(alpha: 0.55);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: 36,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? Colors.white.withValues(alpha: 0.70)
+                : Colors.white.withValues(alpha: 0.22),
+            width: 1.2,
+          ),
+          color: selected ? Colors.white.withValues(alpha: 0.12) : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          alignment.label,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w700,
+            color: color,
+            height: 1,
+          ),
         ),
       ),
     );
