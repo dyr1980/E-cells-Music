@@ -22,6 +22,13 @@ class KaraokeLinePainter extends CustomPainter {
     required this.maxLines,
     required this.maxWidth,
   }) : _ownsPainters = true {
+    // 对齐修复：TextPainter.layout 的 minWidth 缺省为 0，段宽会收缩为
+    // 文本固有宽，textAlign 无从生效（paint 恒从最左起画——激活行无视
+    // 居中/右对齐设置的根因）。多行排版路径把段宽撑到 maxWidth，让
+    // textAlign 在整行宽度内分配；单行路径（maxWidth 为 infinity，海报
+    // 页跑马灯按内容宽滚动）保持固有宽。
+    final forcedWidth =
+        (maxLines == 1 || maxWidth == double.infinity) ? 0.0 : maxWidth;
     _textPainter = TextPainter(
       text: TextSpan(
         text: line.text,
@@ -30,7 +37,10 @@ class KaraokeLinePainter extends CustomPainter {
       textDirection: textDirection,
       textAlign: textAlign,
       maxLines: maxLines,
-    )..layout(maxWidth: maxLines == 1 ? double.infinity : maxWidth);
+    )..layout(
+        minWidth: forcedWidth,
+        maxWidth: maxLines == 1 ? double.infinity : maxWidth,
+      );
     // 高亮 painter 必须与主 painter 共享同一份排版参数（仅颜色不同），
     // 否则逐字裁剪矩形会与高亮文字错位。paint() 只做裁剪与复绘。
     _highlightPainter = TextPainter(
@@ -41,7 +51,10 @@ class KaraokeLinePainter extends CustomPainter {
       textDirection: textDirection,
       textAlign: textAlign,
       maxLines: maxLines,
-    )..layout(maxWidth: maxLines == 1 ? double.infinity : maxWidth);
+    )..layout(
+        minWidth: forcedWidth,
+        maxWidth: maxLines == 1 ? double.infinity : maxWidth,
+      );
   }
 
   KaraokeLinePainter._reuse({
@@ -152,6 +165,10 @@ class KaraokeLinePainter extends CustomPainter {
     return oldDelegate.position != position ||
         oldDelegate.line != line ||
         oldDelegate.style != style ||
-        oldDelegate.maxWidth != maxWidth;
+        oldDelegate.maxWidth != maxWidth ||
+        // 对齐/方向变更必须重绘：否则播放中切换对齐方式，激活行仍按
+        // 旧对齐绘制（CustomPaint 对新旧 painter 实例也要经此判定）。
+        oldDelegate.textAlign != textAlign ||
+        oldDelegate.textDirection != textDirection;
   }
 }
