@@ -128,7 +128,9 @@ dependencies {
     }
     // Android 12+ 系统启动屏 + API 26-31 兼容层（易格音乐同款启动画面：
     // 彩色背景 + 应用图标，样式见 res/values/styles.xml 的 LaunchTheme）。
-    implementation("androidx.core:core-splashscreen:1.2.0")
+    // 用 1.0.1：1.2.0 的 installSplashScreen 改成了 @JvmName 门面静态，
+    // 仅适配 Java 调用方，Kotlin 侧无法解析；两者启动屏属性完全一致。
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
 
 flutter {

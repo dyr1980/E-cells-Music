@@ -28,7 +28,6 @@ import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.splashscreen.SplashScreen
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -41,9 +40,12 @@ import kotlin.concurrent.thread
 
 class MainActivity : AudioServiceActivity() {
     // 易格音乐同款启动画面（LaunchTheme = Theme.SplashScreen）：必须在
-    // super.onCreate 之前安装，否则 API 31+ 不应用自定义启动屏、26-30 无兼容层。
+    // super.onCreate 之前安装，否则 API 31+ 不应用自定义启动屏、26-30 无
+    // 兼容层。经 SplashCompat（Java 桥接）调用：core-splashscreen 把
+    // installSplashScreen 编译成伴生扩展形态，本项目 Kotlin 2.2.20 无法
+    // 解析该符号，Java 静态调用不受影响。
     override fun onCreate(savedInstanceState: Bundle?) {
-        SplashScreen.installSplashScreen(this)
+        SplashCompat.install(this)
         super.onCreate(savedInstanceState)
     }
 
