@@ -85,7 +85,17 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
-  /// 开关连接新音频设备自动播放功能。
+  /// 开机自启播放内容（'resume' = 继续播放 / 'daily' = 每日推荐）。
+  /// 非法持久化值回落默认 'resume'。
+  Future<void> setStartupPlaySource(String source) async {
+    final next = source == 'daily' ? 'daily' : 'resume';
+    if (startupPlaySource == next) return;
+    startupPlaySource = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_startupPlaySourceSettingKey, next);
+    notifyListeners();
+  }
+
   /// 语音搜歌模式（易格同款）：'all' = 全部结果入队 / 'first' = 仅播首曲。
   /// 非法持久化值回落默认 'all'。
   Future<void> setVoiceSearchMode(String mode) async {
@@ -97,6 +107,7 @@ mixin _PlayerSettings on _PlayerControllerBase {
     notifyListeners();
   }
 
+  /// 开关连接新音频设备自动播放功能。
   Future<void> setAutoPlayOnDeviceConnected(bool enabled) async {
     if (autoPlayOnDeviceConnected == enabled) return;
     autoPlayOnDeviceConnected = enabled;
@@ -372,6 +383,11 @@ mixin _PlayerSettings on _PlayerControllerBase {
         allowCellularPrecache;
     autoPlayOnStartupEnabled =
         prefs.getBool(_autoPlayOnStartupSettingKey) ?? autoPlayOnStartupEnabled;
+    // 开机自启播放内容恢复（非法值回落默认 resume）。
+    startupPlaySource =
+        prefs.getString(_startupPlaySourceSettingKey) == 'daily'
+            ? 'daily'
+            : 'resume';
     equalizerEnabled =
         prefs.getBool(_equalizerEnabledSettingKey) ?? equalizerEnabled;
     equalizerPresetName =

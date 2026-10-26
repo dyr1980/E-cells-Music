@@ -142,6 +142,8 @@ const _voiceSearchModeSettingKey = 'settings.voice_search_mode';
 const _smartQualitySettingKey = 'settings.smart_quality_enabled';
 const _allowCellularPrecacheSettingKey = 'settings.allow_cellular_precache';
 const _autoPlayOnStartupSettingKey = 'settings.auto_play_on_startup';
+// 开机自启播放内容：'resume' = 继续播放上次队列（默认）/ 'daily' = 每日推荐。
+const _startupPlaySourceSettingKey = 'settings.startup_play_source';
 const _autoPlayOnDeviceConnectedSettingKey =
     'settings.auto_play_on_device_connected';
 const _bluetoothLyricsEnabledSettingKey = 'settings.bluetooth_lyrics_enabled';
@@ -668,6 +670,10 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
       allowCellularPrecache || !NetworkMonitor.instance.isCellular;
   bool autoPlayOnStartupEnabled = false;
   bool hasRestoredPlaybackState = false;
+
+  /// 开机自启播放内容：'resume' = 继续播放上次队列 / 'daily' = 每日推荐
+  /// （无推荐数据时回退 'resume' 行为）。
+  String startupPlaySource = 'resume';
   double playbackSpeed = 1.0;
   bool equalizerEnabled = false;
   List<int> equalizerLevels = List<int>.of(_defaultEqualizerLevels);

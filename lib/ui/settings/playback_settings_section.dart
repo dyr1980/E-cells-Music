@@ -76,6 +76,40 @@ class PlaybackSettingsSection extends StatelessWidget {
     }
   }
 
+  /// 开机播放内容选择弹窗（开机自启播放开启时可见）。
+  Future<void> _showStartupPlaySourceDialog(BuildContext context) async {
+    final source = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('开机播放内容'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(dialogContext).pop('resume'),
+            child: const ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('继续播放'),
+              // 只存队列/当前歌，不存进度：恢复从歌曲开头播，不承诺"续播进度"。
+              subtitle: Text('恢复上次的播放队列，从上次的歌曲开始播放'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(dialogContext).pop('daily'),
+            // 缓存的推荐歌单可能过期（首页缓存 adopt 不判 isStale），
+            // 不承诺"今日"。
+            child: const ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('每日推荐'),
+              subtitle: Text('播放每日推荐歌单并替换播放队列；无推荐数据时恢复上次队列'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (source != null) {
+      await player.setStartupPlaySource(source);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -126,6 +160,20 @@ class PlaybackSettingsSection extends StatelessWidget {
               onChanged: player.setAutoPlayOnStartupEnabled,
             ),
             SettingsDivider(),
+            // 开机自启播放的内容偏好：仅在开关开启时展示（与父开关同色
+            // 表从属；无平台/形态依赖，全形态可见）。
+            if (player.autoPlayOnStartupEnabled) ...[
+              SettingsTile(
+                icon: Icons.queue_music_rounded,
+                iconColor: const Color(0xFF00897B),
+                title: '开机播放内容',
+                subtitle: player.startupPlaySource == 'daily'
+                    ? '每日推荐（无推荐数据时恢复上次队列）'
+                    : '继续播放（恢复上次队列）',
+                onTap: () => _showStartupPlaySourceDialog(context),
+              ),
+              SettingsDivider(),
+            ],
             // 移动端/车机专属：桌面隐藏（含其前导分隔线，避免双线）。
             if (!isDesktopFormFactor) ...[
               SettingsSwitchTile(

@@ -791,10 +791,16 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
           : Duration.zero;
       Future<void>.delayed(delay, () {
         if (!mounted) return;
-        if (hasRestored) {
-          widget.player.resumePlayback();
-        } else {
+        // 消费时刻才读 startupPlaySource：_restoreSettings 是构造函数
+        // unawaited 发起的异步恢复，_checkAndAutoPlay 触发时可能尚未
+        // 落地；此刻（首帧后/Windows 再 +300ms）prefs 必然恢复完成。
+        final preferDaily = widget.player.startupPlaySource == 'daily';
+        if (songs.isNotEmpty && (preferDaily || !hasRestored)) {
+          // 每日推荐替换整个队列；preferDaily 但推荐为空（如未登录且
+          // 缓存无数据）时回退继续播放。
           widget.player.playSong(songs.first, queue: songs);
+        } else {
+          widget.player.resumePlayback();
         }
       });
     });
