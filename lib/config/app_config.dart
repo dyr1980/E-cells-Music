@@ -2,11 +2,11 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '易格音乐';
-  static const appVersion = '2.0.1';
+  static const appVersion = '2.0.2';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。2.0.1 → 2000001。
-  static const appVersionCode = '2000001';
+  /// 的 semverToCode 与 docs/release-process.md）。2.0.2 → 2000002。
+  static const appVersionCode = '2000002';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
