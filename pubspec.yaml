@@ -82,6 +82,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # 仅测试用：注入可控延时的 prefs store（player_startup_restore_race_test
+  # 模拟冷启动 prefs 慢速加载晚于每日推荐起播的竞态）。
+  shared_preferences_platform_interface: ^2.4.2
 
 dependency_overrides:
   # 本地 vendored 副本（packages/window_manager），勿直接换回 pub.dev 版本：

@@ -72,6 +72,10 @@ class _AutoPlayFakePlayerController extends ChangeNotifier
   @override
   bool hasRestoredPlaybackState = true;
 
+  // 启动恢复完成信号：真实控制器由构造函数的两路恢复 whenComplete 放行。
+  @override
+  Future<void> get startupRestored => Future<void>.value();
+
   final List<Song> playedSongs = [];
   final List<List<Song>> playedQueues = [];
   bool resumed = false;

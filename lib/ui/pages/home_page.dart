@@ -789,11 +789,18 @@ class HomePageState extends SwrSectionState<HomePage, HomeData>
       final delay = defaultTargetPlatform == TargetPlatform.windows
           ? const Duration(milliseconds: 300)
           : Duration.zero;
-      Future<void>.delayed(delay, () {
+      Future<void>.delayed(delay, () async {
+        if (!mounted) return;
+        // 先等两路启动恢复（settings/播放状态）收尾再消费：冷启动磁盘
+        // 繁忙时 prefs 首次加载可能慢于首帧，若每日推荐先起播、
+        // _restorePlaybackState 晚到，恢复会用上次队列整队覆盖在播会话，
+        // 在途起播或曲末切歌被「已切歌」守卫放弃——表现为开机自启播完
+        // 第一首就停在曲尾不再前进。
+        await widget.player.startupRestored;
         if (!mounted) return;
         // 消费时刻才读 startupPlaySource：_restoreSettings 是构造函数
         // unawaited 发起的异步恢复，_checkAndAutoPlay 触发时可能尚未
-        // 落地；此刻（首帧后/Windows 再 +300ms）prefs 必然恢复完成。
+        // 落地；await startupRestored 后 prefs 必然恢复完成。
         final preferDaily = widget.player.startupPlaySource == 'daily';
         if (songs.isNotEmpty && (preferDaily || !hasRestored)) {
           // 每日推荐替换整个队列；preferDaily 但推荐为空（如未登录且

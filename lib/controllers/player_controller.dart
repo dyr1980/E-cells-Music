@@ -188,8 +188,19 @@ class PlayerController extends _PlayerControllerBase
   static const audioEffectProfiles = kAudioEffectProfiles;
 
   PlayerController(super.api, super.audioHandler) {
-    unawaited(_restoreSettings());
-    unawaited(_restorePlaybackState());
+    // whenComplete 兜底异常路径也放行等待方（恢复内部已自捕获，正常不抛）。
+    unawaited(
+      _restoreSettings().whenComplete(() {
+        if (!_settingsRestored.isCompleted) _settingsRestored.complete();
+      }),
+    );
+    unawaited(
+      _restorePlaybackState().whenComplete(() {
+        if (!_playbackStateRestored.isCompleted) {
+          _playbackStateRestored.complete();
+        }
+      }),
+    );
     // 车机切网（WiFi ↔ 蜂窝 ↔ 离线）后恢复网络时，若上一首因断网停在
     // 错误态，自动重播一次；isRetry 防止失败后再次触发形成循环。
     _networkRestoredSub = NetworkMonitor.instance.onConnectivityRestored.listen(
@@ -381,6 +392,9 @@ class PlayerController extends _PlayerControllerBase
   @override
   void dispose() {
     _disposed = true;
+    // 启动恢复的等待方（开机自启播放闭包）不能因控制器销毁而永久挂起。
+    if (!_settingsRestored.isCompleted) _settingsRestored.complete();
+    if (!_playbackStateRestored.isCompleted) _playbackStateRestored.complete();
     // 使在途的响度分析结果失效：cancelAnalysis 只能阻断后续进度，
     // 拦不住已在回调队列里的中途/最终值，不递增 serial 的话它们会在
     // dispose 完成后 notifyListeners 并对已释放的 AudioPlayer 应用增益。
@@ -751,6 +765,22 @@ abstract class _PlayerControllerBase extends ChangeNotifier {
   String? _endOfSongLoggedForHash;
 
   bool get _isChangingSource => _changingSourceDepth > 0;
+
+  /// 构造函数两路 unawaited 启动恢复（settings / 播放状态）的完成信号。
+  ///
+  /// 启动消费方（开机自启播放等）在触发播放前必须 await 它：冷启动磁盘
+  /// 繁忙时 SharedPreferences 首次加载可能慢于首页首帧，若每日推荐先起播、
+  /// [_restorePlaybackState] 晚到，恢复会用上次队列整队覆盖在播会话
+  /// （queue/currentSong/洗牌状态），在途起播或曲末切歌被「已切歌」守卫
+  /// 放弃 —— 表现为开机自启播完第一首就停在曲尾不再前进。
+  final Completer<void> _settingsRestored = Completer<void>();
+  final Completer<void> _playbackStateRestored = Completer<void>();
+
+  /// 两路启动恢复是否均已收尾（含「无持久化状态」的空恢复）。
+  Future<void> get startupRestored => Future.wait([
+        _settingsRestored.future,
+        _playbackStateRestored.future,
+      ]);
 
   /// 曲末自动切歌诊断日志。实机排查「播完不跳下一首」时唯一需要过滤的通道：
   ///

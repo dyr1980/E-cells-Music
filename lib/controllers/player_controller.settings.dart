@@ -576,6 +576,32 @@ mixin _PlayerSettings on _PlayerControllerBase {
           .toList();
       if (queueList.isEmpty) return;
 
+      // 与启动播放路径的竞态防护：prefs 慢速加载（冷启动磁盘繁忙）时，
+      // 开机自启「每日推荐」可能在恢复完成前就已起播（currentSong 非空）。
+      // 此时不得用上次队列整队覆盖在播会话——轻则曲末切回旧队列、洗牌
+      // 状态错乱，重则在途的起播/曲末切歌被 playSong 的「已切歌」守卫
+      // 放弃，队列停在曲尾不再前进（实测：随机播放播完一首即停）。
+      // 只恢复播放模式偏好，洗牌队列按在播队列原位重建。
+      if (currentSong != null) {
+        if (_disposed) return;
+        final modeName = state['playbackMode'] as String?;
+        if (modeName != null) {
+          playbackMode = PlaybackMode.values.firstWhere(
+            (m) => m.name == modeName,
+            orElse: () => PlaybackMode.playlistLoop,
+          );
+        }
+        if (playbackMode == PlaybackMode.shuffle) {
+          _shuffleQueue.reset(queue.length, currentIndex: currentIndex);
+        }
+        hasRestoredPlaybackState = true;
+        // 在播会话 + 恢复后的模式偏好一并落盘，防止下次启动读到
+        // 起播时（设置未恢复）写入的默认模式把偏好冲掉。
+        _scheduleSavePlaybackState();
+        notifyListeners();
+        return;
+      }
+
       queue = queueList;
       final index = (state['currentIndex'] as int? ?? 0).clamp(
         0,
