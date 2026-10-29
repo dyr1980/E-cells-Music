@@ -34,6 +34,7 @@ jobs:
             abi: arm32
             rust-target: armv7-linux-androideabi
             flutter-target: android-arm
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,13 +97,14 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
-      # 新增步骤：如果是手动触发，生成一个虚拟的版本号，防止后面的脚本报错
+      # 【终极融合 1】：优先使用 Tag 名字，如果没有 Tag（手动点击），自动去 pubspec.yaml 提取版本号
       - name: Set Version Tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG_NAME=manual-build-${{ github.run_number }}" >> $GITHUB_ENV
-          else
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          else
+            VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+            echo "TAG_NAME=v$VERSION" >> $GITHUB_ENV
           fi
 
       - name: Build release APK (${{ matrix.abi }}, ${{ matrix.flavor }})
@@ -131,15 +133,15 @@ jobs:
   publish-release:
     name: Auto Publish to Release
     needs: build-apk
-    # 【已修改】：删除了 if 限制条件，打包成功后必定执行发布
     runs-on: ubuntu-latest
     steps:
       - name: Set Version Tag (Again)
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG_NAME=manual-build-${{ github.run_number }}" >> $GITHUB_ENV
-          else
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          else
+            VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+            echo "TAG_NAME=v$VERSION" >> $GITHUB_ENV
           fi
 
       - name: Download impeller arm64 APK
@@ -169,7 +171,6 @@ jobs:
              "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk"
           ls -la
 
-      # 生成单一的 checksums.txt 文件
       - name: Generate checksums.txt
         run: |
           cd dist
@@ -177,7 +178,7 @@ jobs:
           echo "Generated checksum file content:"
           cat "xcz-music-${{ env.TAG_NAME }}-checksums.txt"
 
-      # 关键补充步骤：如果 Release 不存在，则自动创建
+      # 1. 创建 Release（附带好说明书）
       - name: Create Release if not exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -185,9 +186,15 @@ jobs:
           gh release view "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" || \
           gh release create "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" \
             --title "Release ${{ env.TAG_NAME }}" \
-            --notes "Auto-generated release for ${{ env.TAG_NAME }}" \
+            --notes "## 📥 下载指南
+          * **主流手机/新车机**：下载 \`impeller-arm64.apk\`
+          * **画面花屏/闪退**：下载 \`arm64-v8a.apk\`（兼容版）
+          * **老旧车机 (32位)**：下载 \`armeabi-v7a.apk\`
+          
+          *注：32位老设备请勿下载 impeller 版本。*" \
             --draft=false
 
+      # 2. 上传文件
       - name: Upload APKs to Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -206,3 +213,15 @@ jobs:
           done
           gh release upload "${{ env.TAG_NAME }}" "${files[@]}" \
             -R "$GITHUB_REPOSITORY" --clobber
+
+      # 3. 保底更新：如果该 Release 已存在（上传时覆盖），强制把说明书更新进去
+      - name: Update Release Notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" --notes "## 📥 下载指南
+          * **主流手机/新车机**：下载 \`impeller-arm64.apk\`
+          * **画面花屏/闪退**：下载 \`arm64-v8a.apk\`（兼容版）
+          * **老旧车机 (32位)**：下载 \`armeabi-v7a.apk\`
+          
+          *注：32位老设备请勿下载 impeller 版本。*"
