@@ -97,7 +97,6 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
-      # 提取版本号，供打包时命名使用
       - name: Set Version Tag
         id: version
         run: |
@@ -136,7 +135,6 @@ jobs:
     needs: build-apk
     runs-on: ubuntu-latest
     steps:
-      # 【核心修复 1】：重新拉取代码，这样在发布任务里就能直接读取 pubspec.yaml 的版本号了
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -153,19 +151,18 @@ jobs:
       - name: Set Env
         run: echo "TAG_NAME=${{ steps.version.outputs.TAG_NAME }}" >> $GITHUB_ENV
 
-      # 【核心修复 2】：直接下载所有产物，合并到 dist 目录（不再去猜名字，100% 能抓到）
       - name: Download all APKs
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      # 【关键修复】：用 cp 复制，绝对不弄丢原文件
       - name: Create legacy-named alias APKs (for 1.x clients)
         run: |
           cd dist
-          # 处理重命名，确保生成正确的包名
-          mv "xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk" "xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk" || true
-          mv "xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk" "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk" || true
+          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk" "xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk" || true
+          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk" "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk" || true
           ls -la
 
       - name: Generate checksums.txt
@@ -175,50 +172,25 @@ jobs:
           echo "Generated checksum file content:"
           cat "xcz-music-${{ env.TAG_NAME }}-checksums.txt"
 
-      # 1. 创建 Release（附带好说明书）
-      - name: Create Release if not exists
+      # 【终极绝杀】：用官方插件上传 dist 目录下的所有文件
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: Release ${{ env.TAG_NAME }}
+          draft: false
+          prerelease: false
+          # 自动在 GitHub 上生成一段简洁的版本变更记录
+          generate_release_notes: true
+          body: |
+            ## 📥 下载指南
+            * **主流手机/新车机**：下载 `impeller-arm64.apk`
+            * **画面花屏/闪退**：下载 `arm64-v8a.apk`（兼容版）
+            * **老旧车机 (32位)**：下载 `armeabi-v7a.apk`
+            
+            *注：32位老设备请勿下载 impeller 版本。*
+          files: |
+            dist/*.apk
+            dist/*-checksums.txt
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" || \
-          gh release create "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" \
-            --title "Release ${{ env.TAG_NAME }}" \
-            --notes "## 📥 下载指南
-          * **主流手机/新车机**：下载 \`impeller-arm64.apk\`
-          * **画面花屏/闪退**：下载 \`arm64-v8a.apk\`（兼容版）
-          * **老旧车机 (32位)**：下载 \`armeabi-v7a.apk\`
-          
-          *注：32位老设备请勿下载 impeller 版本。*" \
-            --draft=false
-
-      # 2. 上传文件
-      - name: Upload APKs to Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          files=(
-            "dist/xcz-music-${{ env.TAG_NAME }}-impeller-arm64.apk"
-            "dist/xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk"
-            "dist/xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk"
-            "dist/xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk"
-            "dist/xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk"
-            "dist/xcz-music-${{ env.TAG_NAME }}-checksums.txt"
-          )
-          for f in "${files[@]}"; do
-            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
-          done
-          gh release upload "${{ env.TAG_NAME }}" "${files[@]}" \
-            -R "$GITHUB_REPOSITORY" --clobber
-
-      # 3. 保底更新：强制把说明书更新进去
-      - name: Update Release Notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" --notes "## 📥 下载指南
-          * **主流手机/新车机**：下载 \`impeller-arm64.apk\`
-          * **画面花屏/闪退**：下载 \`arm64-v8a.apk\`（兼容版）
-          * **老旧车机 (32位)**：下载 \`armeabi-v7a.apk\`
-          
-          *注：32位老设备请勿下载 impeller 版本。*"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
