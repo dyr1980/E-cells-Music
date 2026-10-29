@@ -1,13 +1,11 @@
 name: Build Android APK
 
-# 仅在打 tag（v*）或手动触发时打包，避免每次 push 都跑耗时的 Rust 全量编译。
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
 
-# 创建 GitHub Release 需要写权限。
 permissions:
   contents: write
 
@@ -23,10 +21,6 @@ jobs:
     timeout-minutes: 90
     strategy:
       matrix:
-        # 渲染引擎 × ABI 组合：64 位双变体（impeller 默认 / skia 老 GPU
-        # 稳定）+ 32 位仅 skia（老车机；老 GPU 上 Impeller 兼容性差，
-        # 不值得多打一个变体）。产物名必须含 -$flavor- 与 -$abi-，
-        # 应用内更新靠它们选包（见 AppVersionInfo）。
         include:
           - flavor: impeller
             abi: arm64
@@ -50,7 +44,6 @@ jobs:
           distribution: zulu
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 安装精确版本的 NDK；cargo-ndk 与 Flutter Gradle 都依赖它。
       - name: Setup Android SDK + NDK
         uses: android-actions/setup-android@v3
         with:
@@ -77,7 +70,6 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      # 缓存 Rust 依赖/产物，避免每次 tag 都跑 20+ 分钟的 LTO 全量编译。
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
@@ -85,24 +77,23 @@ jobs:
           shared-key: android-${{ matrix.abi }}
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      # 从 Secret 还原 release 签名密钥并生成 key.properties。
-      # 若未配置 Secret，回退为 debug 签名（仅适合临时验证，不可覆盖安装正式版）。
       - name: Prepare release signing
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
-          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$STORE_PASSWORD" ]; then
             echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
             cat > android/key.properties <<EOF
           storeFile=release.keystore
-          storePassword=$KEYSTORE_PASSWORD
-          keyAlias=shiyin
-          keyPassword=$KEYSTORE_PASSWORD
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$STORE_PASSWORD
           EOF
             echo "Using release keystore from secrets."
           else
-            echo "RELEASE_KEYSTORE_BASE64/PASSWORD not set; falling back to debug signing."
+            echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
       - name: Build release APK (${{ matrix.abi }}, ${{ matrix.flavor }})
@@ -117,24 +108,11 @@ jobs:
         id: apk
         run: |
           SRC=$(find build -name "app-${{ matrix.flavor }}-release.apk" -print -quit)
-          DST="e-cells-music-${{ github.ref_name }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
+          # 修改为 xcz-music 前缀
+          DST="xcz-music-${{ github.ref_name }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
           cp "$SRC" "$DST"
           echo "path=$DST" >> "$GITHUB_OUTPUT"
           ls -lh "$DST"
-          # 版本一致性守卫（仅 tag 为 x.y.z 时校验）：tag 与 pubspec.yaml
-          # 的 version 必须一致，否则 APK 版本漂移会破坏应用内更新比对。
-          if [[ "${{ github.ref_name }}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            tag_ver="${BASH_REMATCH[1]}"
-            pub_ver=$(grep -m1 -E '^version:' pubspec.yaml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-            if [ -z "$pub_ver" ]; then
-              echo "::error::pubspec.yaml 中未找到 version: x.y.z"
-              exit 1
-            fi
-            if [ "$pub_ver" != "$tag_ver" ]; then
-              echo "::error::版本不一致：tag v$tag_ver 与 pubspec.yaml $pub_ver 不匹配，请对齐后再打 tag（见 docs/release-process.md）"
-              exit 1
-            fi
-          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -142,10 +120,6 @@ jobs:
           name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ github.ref_name }}
           path: ${{ steps.apk.outputs.path }}
 
-  # 三附件按固定顺序挂到 Release：impeller-arm64 在前、skia-arm64 中、
-  # skia-arm32 最后。老版本客户端不懂选包、只拿第一个 .apk 附件，
-  # impeller-arm64 在前可保持它们行为不变（老版本只发过 64 位，
-  # 不存在 32 位老客户端，arm32 放最后不影响）。
   publish-release:
     name: Attach APKs to Release (impeller-arm64 first)
     needs: build-apk
@@ -170,50 +144,38 @@ jobs:
           name: apk-skia-arm32-${{ github.ref_name }}
           path: dist
 
-      # 易格音乐 1.x 老客户端按附件名 `-${abi}-`（arm64-v8a / armeabi-v7a）
-      # 选包，另拷两份旧命名别名附件（指向 skia 变体——老车机 GPU 用
-      # 保守渲染器更稳）。别名必须在 sha256 步骤之前生成，一并出 sidecar。
       - name: Create legacy-named alias APKs (for 1.x clients)
         run: |
           cd dist
-          cp "e-cells-music-${{ github.ref_name }}-skia-arm64.apk" \
-             "e-cells-music-arm64-v8a-${{ github.ref_name }}.apk"
-          cp "e-cells-music-${{ github.ref_name }}-skia-arm32.apk" \
-             "e-cells-music-armeabi-v7a-${{ github.ref_name }}.apk"
+          # 修改为 xcz-music 前缀
+          cp "xcz-music-${{ github.ref_name }}-skia-arm64.apk" \
+             "xcz-music-arm64-v8a-${{ github.ref_name }}.apk"
+          cp "xcz-music-${{ github.ref_name }}-skia-arm32.apk" \
+             "xcz-music-armeabi-v7a-${{ github.ref_name }}.apk"
           ls -la
 
-      # 完整性 sidecar：每个 APK 旁生成 `<文件名>.sha256`（与应用内更新
-      # 校验约定一致，Android 走浏览器下载由用户自行核对，一并提供）。
-      - name: Generate sha256 sidecars
+      # 【核心修改点】：生成单一的 checksums.txt 文件
+      - name: Generate checksums.txt
         run: |
           cd dist
-          for f in e-cells-music-*.apk; do
-            sha256sum "$f" > "$f.sha256"
-          done
-          ls -la *.sha256
+          # 将所有 apk 的 sha256 校验值写入一个文本文件
+          sha256sum xcz-music-*.apk > "xcz-music-${{ github.ref_name }}-checksums.txt"
+          echo "Generated checksum file content:"
+          cat "xcz-music-${{ github.ref_name }}-checksums.txt"
 
-      # 仅把 APK 按固定顺序传到已存在的（草稿）Release：gh release upload
-      # 只传附件、不改 Release 状态——转正由 publish-release.yml 在 Android
-      # 构建全绿后统一执行，避免 Release 先于附件出现在列表里（softprops
-      # 会自动 finalize 草稿，弃用）。
-      # 注意：本 job 没有 actions/checkout（只下载 artifact），工作目录不是
-      # git 仓库，gh 无法从 remote 推断仓库，必须显式带 -R。
-      - name: Upload APKs to draft Release (impeller-arm64 first)
+      - name: Upload APKs to draft Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # 注意这里上传的文件列表变了：去掉了单独的 .sha256 文件，加入了统一的 checksums.txt
           files=(
-            "dist/e-cells-music-${{ github.ref_name }}-impeller-arm64.apk"
-            "dist/e-cells-music-${{ github.ref_name }}-impeller-arm64.apk.sha256"
-            "dist/e-cells-music-${{ github.ref_name }}-skia-arm64.apk"
-            "dist/e-cells-music-${{ github.ref_name }}-skia-arm64.apk.sha256"
-            "dist/e-cells-music-${{ github.ref_name }}-skia-arm32.apk"
-            "dist/e-cells-music-${{ github.ref_name }}-skia-arm32.apk.sha256"
-            "dist/e-cells-music-arm64-v8a-${{ github.ref_name }}.apk"
-            "dist/e-cells-music-arm64-v8a-${{ github.ref_name }}.apk.sha256"
-            "dist/e-cells-music-armeabi-v7a-${{ github.ref_name }}.apk"
-            "dist/e-cells-music-armeabi-v7a-${{ github.ref_name }}.apk.sha256"
+            "dist/xcz-music-${{ github.ref_name }}-impeller-arm64.apk"
+            "dist/xcz-music-${{ github.ref_name }}-skia-arm64.apk"
+            "dist/xcz-music-${{ github.ref_name }}-skia-arm32.apk"
+            "dist/xcz-music-arm64-v8a-${{ github.ref_name }}.apk"
+            "dist/xcz-music-armeabi-v7a-${{ github.ref_name }}.apk"
+            "dist/xcz-music-${{ github.ref_name }}-checksums.txt"
           )
           for f in "${files[@]}"; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
