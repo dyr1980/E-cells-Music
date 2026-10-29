@@ -1,15 +1,5 @@
 name: Publish Release
 
-# 发版可见性编排（见 docs/release-process.md 第六节）：
-# 发版流程先推 v* tag 触发 Android 构建，再用 `gh release create --draft`
-# 建草稿 Release——草稿对公众不可见、/releases/latest 也不返回，客户端
-# 检查更新在构建期间看到的仍是上一版。构建流水线对同一 tag 成功后，本
-# 工作流把草稿转正发布；失败则 Release 停留草稿，按发版文档「撤回」
-# 小节处理后重走。
-# （v2.0.0 起本项目仅发布 Android 端，桌面/Web 平台构建已移除。）
-#
-# 触发方式：workflow_run 监听 Android 构建流水线的 completed 事件。
-# isDraft 检查保证幂等（重复触发/手动已转正时不再动作）。
 on:
   workflow_run:
     workflows: ["Build Android APK"]
@@ -20,8 +10,6 @@ permissions:
 
 jobs:
   publish:
-    # 仅 tag 推送触发的构建才参与发版判定（构建流水线另有
-    # workflow_dispatch 手动入口，手动跑不应碰 Release）。
     if: >
       github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
