@@ -12,7 +12,7 @@ class AboutPage extends StatefulWidget {
   const AboutPage({super.key, required this.api});
 
   static final Uri _repositoryUri = Uri.parse(
-    'https://github.com/e-cells/E-cells-Music',
+    'https://github.com/dyr1980/E-cells-Music',
   );
 
   final MusicApi api;
@@ -68,7 +68,7 @@ class _AboutPageState extends State<AboutPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '懂你的每一首热爱',
+                  '小橙子，懂你的每一首热爱',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w600,
@@ -117,7 +117,7 @@ class _AboutPageState extends State<AboutPage> {
                   _InfoRow(label: '渲染引擎', value: AppConfig.rendererLabel),
                   _InfoLinkRow(
                     label: 'GitHub',
-                    value: 'e-cells/E-cells-Music',
+                    value: 'dyr1980/E-cells-Music',
                     onTap: () => _openRepository(context),
                   ),
                 ],
@@ -282,4 +282,3 @@ class _InfoRow extends StatelessWidget {
     );
   }
 }
-
