@@ -97,14 +97,15 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
-      # 【终极融合 1】：优先使用 Tag 名字，如果没有 Tag（手动点击），自动去 pubspec.yaml 提取版本号
+      # 在这里提取版本号，并输出为 output，供下一个 job 使用
       - name: Set Version Tag
+        id: version
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-            echo "TAG_NAME=v$VERSION" >> $GITHUB_ENV
+            echo "TAG_NAME=v$VERSION" >> $GITHUB_OUTPUT
           fi
 
       - name: Build release APK (${{ matrix.abi }}, ${{ matrix.flavor }})
@@ -119,7 +120,7 @@ jobs:
         id: apk
         run: |
           SRC=$(find build -name "app-${{ matrix.flavor }}-release.apk" -print -quit)
-          DST="xcz-music-${{ env.TAG_NAME }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
+          DST="xcz-music-${{ steps.version.outputs.TAG_NAME }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
           cp "$SRC" "$DST"
           echo "path=$DST" >> "$GITHUB_OUTPUT"
           ls -lh "$DST"
@@ -127,7 +128,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ env.TAG_NAME }}
+          name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ steps.version.outputs.TAG_NAME }}
           path: ${{ steps.apk.outputs.path }}
 
   publish-release:
@@ -135,31 +136,26 @@ jobs:
     needs: build-apk
     runs-on: ubuntu-latest
     steps:
-      - name: Set Version Tag (Again)
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
-          else
-            VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-            echo "TAG_NAME=v$VERSION" >> $GITHUB_ENV
-          fi
+      # 接住刚才传过来的版本号
+      - name: Use Version Tag
+        run: echo "TAG_NAME=${{ needs.build-apk.outputs.TAG_NAME }}" >> $GITHUB_ENV
 
       - name: Download impeller arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-impeller-arm64-${{ env.TAG_NAME }}
+          name: apk-impeller-arm64-${{ needs.build-apk.outputs.TAG_NAME }}
           path: dist
 
       - name: Download skia arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-skia-arm64-${{ env.TAG_NAME }}
+          name: apk-skia-arm64-${{ needs.build-apk.outputs.TAG_NAME }}
           path: dist
 
       - name: Download skia arm32 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-skia-arm32-${{ env.TAG_NAME }}
+          name: apk-skia-arm32-${{ needs.build-apk.outputs.TAG_NAME }}
           path: dist
 
       - name: Create legacy-named alias APKs (for 1.x clients)
