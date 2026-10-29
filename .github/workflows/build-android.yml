@@ -96,6 +96,15 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
+      # 新增步骤：如果是手动触发，生成一个虚拟的版本号，防止后面的脚本报错
+      - name: Set Version Tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG_NAME=manual-build-${{ github.run_number }}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
       - name: Build release APK (${{ matrix.abi }}, ${{ matrix.flavor }})
         run: >-
           flutter build apk --release
@@ -108,8 +117,7 @@ jobs:
         id: apk
         run: |
           SRC=$(find build -name "app-${{ matrix.flavor }}-release.apk" -print -quit)
-          # 修改为 xcz-music 前缀
-          DST="xcz-music-${{ github.ref_name }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
+          DST="xcz-music-${{ env.TAG_NAME }}-${{ matrix.flavor }}-${{ matrix.abi }}.apk"
           cp "$SRC" "$DST"
           echo "path=$DST" >> "$GITHUB_OUTPUT"
           ls -lh "$DST"
@@ -117,61 +125,67 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ github.ref_name }}
+          name: apk-${{ matrix.flavor }}-${{ matrix.abi }}-${{ env.TAG_NAME }}
           path: ${{ steps.apk.outputs.path }}
 
   publish-release:
-    name: Attach APKs to Release (impeller-arm64 first)
+    name: Auto Publish to Release
     needs: build-apk
-    if: startsWith(github.ref, 'refs/tags/')
+    # 【已修改】：删除了 if 限制条件，打包成功后必定执行发布
     runs-on: ubuntu-latest
     steps:
+      - name: Set Version Tag (Again)
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG_NAME=manual-build-${{ github.run_number }}" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
       - name: Download impeller arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-impeller-arm64-${{ github.ref_name }}
+          name: apk-impeller-arm64-${{ env.TAG_NAME }}
           path: dist
 
       - name: Download skia arm64 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-skia-arm64-${{ github.ref_name }}
+          name: apk-skia-arm64-${{ env.TAG_NAME }}
           path: dist
 
       - name: Download skia arm32 APK
         uses: actions/download-artifact@v4
         with:
-          name: apk-skia-arm32-${{ github.ref_name }}
+          name: apk-skia-arm32-${{ env.TAG_NAME }}
           path: dist
 
       - name: Create legacy-named alias APKs (for 1.x clients)
         run: |
           cd dist
-          # 修改为 xcz-music 前缀
-          cp "xcz-music-${{ github.ref_name }}-skia-arm64.apk" \
-             "xcz-music-arm64-v8a-${{ github.ref_name }}.apk"
-          cp "xcz-music-${{ github.ref_name }}-skia-arm32.apk" \
-             "xcz-music-armeabi-v7a-${{ github.ref_name }}.apk"
+          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk" \
+             "xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk"
+          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk" \
+             "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk"
           ls -la
 
-      # 【核心修改点】：生成单一的 checksums.txt 文件
+      # 生成单一的 checksums.txt 文件
       - name: Generate checksums.txt
         run: |
           cd dist
-          # 将所有 apk 的 sha256 校验值写入一个文本文件
-          sha256sum xcz-music-*.apk > "xcz-music-${{ github.ref_name }}-checksums.txt"
+          sha256sum xcz-music-*.apk > "xcz-music-${{ env.TAG_NAME }}-checksums.txt"
           echo "Generated checksum file content:"
-          cat "xcz-music-${{ github.ref_name }}-checksums.txt"
+          cat "xcz-music-${{ env.TAG_NAME }}-checksums.txt"
 
-      # 【关键补充步骤】：如果 Release 不存在，则自动创建
+      # 关键补充步骤：如果 Release 不存在，则自动创建
       - name: Create Release if not exists
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" || \
-          gh release create "${{ github.ref_name }}" -R "$GITHUB_REPOSITORY" \
-            --title "Release ${{ github.ref_name }}" \
-            --notes "Auto-generated release for ${{ github.ref_name }}" \
+          gh release view "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" || \
+          gh release create "${{ env.TAG_NAME }}" -R "$GITHUB_REPOSITORY" \
+            --title "Release ${{ env.TAG_NAME }}" \
+            --notes "Auto-generated release for ${{ env.TAG_NAME }}" \
             --draft=false
 
       - name: Upload APKs to Release
@@ -179,17 +193,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # 注意这里上传的文件列表变了：去掉了单独的 .sha256 文件，加入了统一的 checksums.txt
           files=(
-            "dist/xcz-music-${{ github.ref_name }}-impeller-arm64.apk"
-            "dist/xcz-music-${{ github.ref_name }}-skia-arm64.apk"
-            "dist/xcz-music-${{ github.ref_name }}-skia-arm32.apk"
-            "dist/xcz-music-arm64-v8a-${{ github.ref_name }}.apk"
-            "dist/xcz-music-armeabi-v7a-${{ github.ref_name }}.apk"
-            "dist/xcz-music-${{ github.ref_name }}-checksums.txt"
+            "dist/xcz-music-${{ env.TAG_NAME }}-impeller-arm64.apk"
+            "dist/xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk"
+            "dist/xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk"
+            "dist/xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk"
+            "dist/xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk"
+            "dist/xcz-music-${{ env.TAG_NAME }}-checksums.txt"
           )
           for f in "${files[@]}"; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
           done
-          gh release upload "${{ github.ref_name }}" "${files[@]}" \
+          gh release upload "${{ env.TAG_NAME }}" "${files[@]}" \
             -R "$GITHUB_REPOSITORY" --clobber
