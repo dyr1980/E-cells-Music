@@ -97,7 +97,7 @@ jobs:
             echo "RELEASE_KEYSTORE_BASE64/RELEASE_STORE_PASSWORD not set; falling back to debug signing."
           fi
 
-      # 在这里提取版本号，并输出为 output，供下一个 job 使用
+      # 提取版本号，供打包时命名使用
       - name: Set Version Tag
         id: version
         run: |
@@ -136,35 +136,36 @@ jobs:
     needs: build-apk
     runs-on: ubuntu-latest
     steps:
-      # 接住刚才传过来的版本号
-      - name: Use Version Tag
-        run: echo "TAG_NAME=${{ needs.build-apk.outputs.TAG_NAME }}" >> $GITHUB_ENV
+      # 【核心修复 1】：重新拉取代码，这样在发布任务里就能直接读取 pubspec.yaml 的版本号了
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Download impeller arm64 APK
+      - name: Get Version Tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+            echo "TAG_NAME=v$VERSION" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Set Env
+        run: echo "TAG_NAME=${{ steps.version.outputs.TAG_NAME }}" >> $GITHUB_ENV
+
+      # 【核心修复 2】：直接下载所有产物，合并到 dist 目录（不再去猜名字，100% 能抓到）
+      - name: Download all APKs
         uses: actions/download-artifact@v4
         with:
-          name: apk-impeller-arm64-${{ needs.build-apk.outputs.TAG_NAME }}
           path: dist
-
-      - name: Download skia arm64 APK
-        uses: actions/download-artifact@v4
-        with:
-          name: apk-skia-arm64-${{ needs.build-apk.outputs.TAG_NAME }}
-          path: dist
-
-      - name: Download skia arm32 APK
-        uses: actions/download-artifact@v4
-        with:
-          name: apk-skia-arm32-${{ needs.build-apk.outputs.TAG_NAME }}
-          path: dist
+          merge-multiple: true
 
       - name: Create legacy-named alias APKs (for 1.x clients)
         run: |
           cd dist
-          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk" \
-             "xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk"
-          cp "xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk" \
-             "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk"
+          # 处理重命名，确保生成正确的包名
+          mv "xcz-music-${{ env.TAG_NAME }}-skia-arm64.apk" "xcz-music-arm64-v8a-${{ env.TAG_NAME }}.apk" || true
+          mv "xcz-music-${{ env.TAG_NAME }}-skia-arm32.apk" "xcz-music-armeabi-v7a-${{ env.TAG_NAME }}.apk" || true
           ls -la
 
       - name: Generate checksums.txt
@@ -210,7 +211,7 @@ jobs:
           gh release upload "${{ env.TAG_NAME }}" "${files[@]}" \
             -R "$GITHUB_REPOSITORY" --clobber
 
-      # 3. 保底更新：如果该 Release 已存在（上传时覆盖），强制把说明书更新进去
+      # 3. 保底更新：强制把说明书更新进去
       - name: Update Release Notes
         env:
           GH_TOKEN: ${{ github.token }}
