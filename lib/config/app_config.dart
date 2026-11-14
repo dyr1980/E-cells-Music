@@ -5,8 +5,8 @@ class AppConfig {
   static const appVersion = '2.0.4';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。2.1.3 → 2001003。
-  static const appVersionCode = '2001003';
+  /// 的 semverToCode 与 docs/release-process.md）。2.0.4 → 2000004。
+  static const appVersionCode = '2000004';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
@@ -24,7 +24,7 @@ class AppConfig {
 
   /// 当前包的目标 ABI，由构建时 `--dart-define=APP_ABI=arm64|arm32`
   /// 烘焙进来（CI 矩阵 / build_apk.bat 负责传；产物名含 `-$abi-`，
-  /// 如 `e-cells-music-v2.0.0-skia-arm32.apk`）。更新检查配合 [renderer]
+  /// 如 `xcz-music-v2.0.4-skia-arm32.apk`）。更新检查配合 [renderer]
   /// 选包，32 位车机拿到 arm64 包无法安装。本地构建默认 arm64。
   static const abi = String.fromEnvironment(
     'APP_ABI',
@@ -98,9 +98,9 @@ class AppConfig {
   static const maxConcurrentDownloads = 3;
 
   // ===== 检查更新（GitHub Releases，无后端） =====
-  /// 托管 Release / APK 的 GitHub 仓库（小橙子音乐 1.x 起沿用的发布仓库）。
+  /// 托管 Release / APK 的 GitHub 仓库。
   /// CI 打 tag 时会在此发布带 APK 附件的 Release。
-  static const githubRepoOwner = 'e-cells';
+  static const githubRepoOwner = 'dyr1980'; // 【已修改】换成你的 GitHub 账号
   static const githubRepoName = 'E-cells-Music';
 
   /// GitHub Releases 最新正式版接口（公开仓库无需鉴权，但必须带 User-Agent）。
@@ -128,7 +128,7 @@ class AppConfig {
   static const githubReleasesLatestPageUrl = '$githubRepoUrl/releases/latest';
 
   /// 请求 GitHub API 时的 User-Agent（GitHub 要求非空，否则 403）。
-  static const githubUpdateUserAgent = 'ECellsMusic-App/$appVersion';
+  static const githubUpdateUserAgent = 'XiaoChengZi-Music-App/$appVersion'; // 【已修改】变成你的专属UA
 
   /// 启动时自动检查更新的最小间隔（手动检查不受此限制）。
   static const updateAutoCheckInterval = Duration(hours: 24);
