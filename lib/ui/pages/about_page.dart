@@ -12,7 +12,7 @@ class AboutPage extends StatefulWidget {
   const AboutPage({super.key, required this.api});
 
   static final Uri _repositoryUri = Uri.parse(
-    'https://github.com/dyr1980/E-cells-Music',
+    'https://github.com/dyr1980/E-cells-Music', // 【修改点1】改为你的 GitHub 仓库
   );
 
   final MusicApi api;
@@ -68,7 +68,7 @@ class _AboutPageState extends State<AboutPage> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '小橙子，懂你的每一首热爱',
+                  '小橙子，懂你的每一首热爱', // 【修改点2】加上了你的专属名称
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w600,
@@ -117,8 +117,43 @@ class _AboutPageState extends State<AboutPage> {
                   _InfoRow(label: '渲染引擎', value: AppConfig.rendererLabel),
                   _InfoLinkRow(
                     label: 'GitHub',
-                    value: 'dyr1980/E-cells-Music',
+                    value: 'dyr1980/E-cells-Music', // 【修改点3】下方展示的链接也改成了你的
                     onTap: () => _openRepository(context),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 【修改点4】这里保留了原作者的防骗开源提示，让页面结构完整
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+              child: _InfoSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.volunteer_activism_rounded,
+                          size: 20,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '本软件完全开源免费，如果您是从淘宝、咸鱼等平台'
+                            '购买的，请直接给店铺差评，谢谢！',
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              height: 1.45,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),

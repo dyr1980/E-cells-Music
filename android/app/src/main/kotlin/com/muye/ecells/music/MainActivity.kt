@@ -2,6 +2,7 @@ package com.muye.ecells.music
 
 import android.Manifest
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.ContentUris
 import android.content.Context
@@ -14,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.app.SearchManager
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import android.media.audiofx.BassBoost
@@ -73,14 +75,23 @@ class MainActivity : AudioServiceActivity() {
     // 让解码循环立即结束,避免旧歌曲分析空跑占 CPU。
     @Volatile private var loudnessAnalysisCancelled: Boolean = false
     private var pendingPermissionResult: MethodChannel.Result? = null
+    // 自定义下载路径（storage_access channel）的运行时写权限请求结果。
+    private var pendingWritePermissionResult: MethodChannel.Result? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         private const val REQUEST_READ_AUDIO = 1001
+        private const val REQUEST_WRITE_STORAGE = 1002
         private const val TAG_SUPER_LYRIC = "SuperLyricPublisher"
         private const val TAG_BLUETOOTH_LYRICS = "BluetoothLyrics"
         private const val TAG_LYRICS_OVERLAY = "LyricsOverlay"
         private const val TAG_VOICE_SEARCH = "VoiceSearch"
+        private const val TAG_STORAGE_ACCESS = "StorageAccess"
+
+        // externalstorage documents provider 的 authority（Shared Storage
+        // 路径 ↔ 卷 docId 的 URI 组装用，见 openDirectoryInFileManager）。
+        private const val EXTERNAL_STORAGE_AUTHORITY =
+            "com.android.externalstorage.documents"
     }
 
     private val downloadReceiver = object : BroadcastReceiver() {
@@ -349,6 +360,76 @@ class MainActivity : AudioServiceActivity() {
                 }
             }
 
+        // 自定义下载路径的公共目录写权限桥（设置-下载位置）：
+        // API≤29 用 WRITE_EXTERNAL_STORAGE 运行时弹窗（配 manifest 的
+        // requestLegacyExternalStorage，Android 10 也可裸写路径）；
+        // API30+ 分区存储下改为用户在系统设置授予「所有文件访问」
+        // （MANAGE_EXTERNAL_STORAGE），跳转后 Dart 侧经 onResume 重查。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "shiyin_music/storage_access")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hasWritePermission" -> {
+                        result.success(hasWriteStoragePermission())
+                    }
+                    "requestWritePermission" -> {
+                        if (hasWriteStoragePermission()) {
+                            result.success(true)
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            // 已授权直接放行；否则跳「所有文件访问」设置页，
+                            // 本调用不回布尔值（null=已跳转，回来后重查）。
+                            try {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:$packageName")
+                                )
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                startActivity(intent)
+                                result.success(null)
+                            } catch (error: Exception) {
+                                // 个别 ROM 精简了该 Activity：兜底到通用
+                                // 「所有文件访问」列表页。
+                                runCatching {
+                                    val fallback = Intent(
+                                        Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                                    )
+                                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    startActivity(fallback)
+                                }
+                                Log.w(TAG_STORAGE_ACCESS, "跳转所有文件访问设置失败: ${error.message}")
+                                result.success(null)
+                            }
+                        } else {
+                            pendingWritePermissionResult = result
+                            ActivityCompat.requestPermissions(
+                                this,
+                                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                                REQUEST_WRITE_STORAGE
+                            )
+                        }
+                    }
+                    // 「已下载-打开文件夹」：用系统文件管理器打开共享存储目录。
+                    // url_launcher 发 Intent 带不上 MIME 类型（file:// 目录
+                    // URI 无人响应且 targetSdk 24+ 有 FileUriExposed 风险，
+                    // 无 MIME 的 content URI 同样无人认领），必须原生发。
+                    "openDirectory" -> {
+                        val path = call.argument<String>("path")
+                        val docId = call.argument<String>("docId")
+                        if (path.isNullOrEmpty() || docId.isNullOrEmpty()) {
+                            result.error("invalid_args", "path or docId is empty", null)
+                            return@setMethodCallHandler
+                        }
+                        runCatching {
+                            openDirectoryInFileManager(path, docId)
+                        }.onSuccess { status ->
+                            result.success(status)
+                        }.onFailure { error ->
+                            result.error("open_failed", error.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         // 桌面歌词（易格方案）：服务实例驱动，不再经 intent action 派发。
         // Flutter 侧整首歌词一次下发（loadLyrics），原生引擎自算当前句。
         desktopLyricsChannel = MethodChannel(
@@ -479,6 +560,18 @@ class MainActivity : AudioServiceActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // 悬浮窗「锁定」按钮：锁定状态经服务回推 Flutter，同步设置页开关。
+        // 挂在 companion 上，服务重建不丢线；回调统一切主线程（MethodChannel
+        // 要求主线程调用）。
+        LyricsOverlayService.lockChangedListener = { locked ->
+            mainHandler.post {
+                desktopLyricsChannel?.invokeMethod(
+                    "onLockChanged",
+                    mapOf("locked" to locked)
+                )
+            }
+        }
 
         // SuperLyric 系统歌词发布（Xposed）
         superLyricChannel = MethodChannel(
@@ -777,6 +870,63 @@ class MainActivity : AudioServiceActivity() {
         )
     }
 
+    /// 自定义下载路径的公共目录写权限是否已具备：
+    /// API30+ = 「所有文件访问」已授予；API≤29 = WRITE_EXTERNAL_STORAGE
+    /// 已授予（Android 10 需配 manifest 的 requestLegacyExternalStorage）。
+    private fun hasWriteStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    /**
+     * 用系统文件管理器打开共享存储目录（已下载-打开文件夹）。
+     *
+     * ACTION_VIEW + externalstorage documents 的目录 content URI + MIME
+     * `vnd.android.document/directory`：DocumentsUI（原生「文件」）、
+     * Files by Google、各家 OEM/第三方文件管理器普遍按此口径声明 VIEW
+     * 过滤器，这是 Android 上打开目录的唯一标准通道（带不上 MIME 的
+     * url_launcher 两种 URI 都无人响应）。
+     *
+     * 不用 resolveActivity 预判：API 30+ 包可见性过滤会让查询结果偏空，
+     * 而 startActivity 不受该过滤影响，直接启动按异常判定即可。
+     *
+     * @param path 目录文件系统路径（用于 Android/data|obb 私有目录判定）
+     * @param docId Dart 侧解析的卷 docId（primary:RelPath 或 卷ID:RelPath）
+     * @return Dart 侧状态：opened / app_private / no_handler
+     */
+    private fun openDirectoryInFileManager(path: String, docId: String): String {
+        // API 30+ 分区存储：任何应用的 Android/data|obb 对其他应用不可读
+        // （持有「所有文件访问」的文件管理器也不豁免），弹开只会得到
+        // 拒绝页，提前返回让 Dart 引导用户改用公共下载目录。
+        val normalized = File(path).absolutePath
+        val appPrivate = normalized.contains("/Android/data/") ||
+            normalized.contains("/Android/obb/")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && appPrivate) {
+            return "app_private"
+        }
+
+        val uri = DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE_AUTHORITY, docId)
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return try {
+            startActivity(intent)
+            "opened"
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG_STORAGE_ACCESS, "无文件管理器声明可打开目录 docId=$docId")
+            "no_handler"
+        } catch (e: SecurityException) {
+            Log.w(TAG_STORAGE_ACCESS, "打开目录被系统拒绝 docId=$docId: ${e.message}")
+            "no_handler"
+        }
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -788,6 +938,12 @@ class MainActivity : AudioServiceActivity() {
                     grantResults[0] == PackageManager.PERMISSION_GRANTED
             pendingPermissionResult?.success(granted)
             pendingPermissionResult = null
+        }
+        if (requestCode == REQUEST_WRITE_STORAGE) {
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingWritePermissionResult?.success(granted)
+            pendingWritePermissionResult = null
         }
         AudioCaptureHandler.onRequestPermissionsResult(requestCode, grantResults)
     }

@@ -9,7 +9,8 @@ import 'package:shiyin_music/ui/pages/downloaded_songs_page.dart';
 /// 1. explorer /select 命令构造——路径含空格时直接 Process.run 会被
 ///    Dart argv 重组包引号（`"/select,D:\a b.mp3"`），explorer 解析不了
 ///    就退回打开默认位置（文档文件夹）；必须经 PowerShell 原样传递。
-/// 2. 自定义下载目录（设置-桌面-下载位置）的持久化与 downloadDir 优先级。
+/// 2. 自定义下载目录（设置-下载位置：桌面「桌面」分节 / Android「缓存」
+///    分节）的持久化与 downloadDir 优先级（override 分支平台无关）。
 void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -34,6 +35,40 @@ void main() {
       );
     });
   });
+
+  group('buildStorageDocId（Android 打开所在目录的卷 docId）', () {
+    test('内部存储路径映射为 primary 卷', () {
+      expect(
+        buildStorageDocId('/storage/emulated/0/Music/易格'),
+        'primary:Music/易格',
+      );
+      expect(
+        buildStorageDocId('/storage/emulated/0/'),
+        'primary:',
+      );
+    });
+
+    test('外置卷（SD/USB，自定义下载位置常见落点）映射为卷 ID', () {
+      expect(
+        buildStorageDocId('/storage/0000-0000/我的音乐'),
+        '0000-0000:我的音乐',
+      );
+      expect(
+        buildStorageDocId('/storage/AB12-CD34/Music/sub dir'),
+        'AB12-CD34:Music/sub dir',
+      );
+    });
+
+    test('非 /storage 路径返回 null（不拼出指向不存在文档的 URI）', () {
+      expect(
+        buildStorageDocId('/data/user/0/com.muye.ecells.music/files/x'),
+        isNull,
+      );
+      // 主用户以外的 emulated 路径同样不支持。
+      expect(buildStorageDocId('/storage/emulated/10/Music'), isNull);
+    });
+  });
+
 
   group('自定义下载目录 override', () {
     test('未设置时 customDownloadDirOverride 返回 null', () async {
@@ -88,7 +123,7 @@ void main() {
       );
     });
 
-    test('downloadDir 优先使用自定义目录并确保其存在（桌面分支）', () async {
+    test('downloadDir 优先使用自定义目录并确保其存在（Android/桌面共用分支）', () async {
       final tmp = await Directory.systemTemp.createTemp('shiyin_dl_override_');
       addTearDown(() async {
         try {

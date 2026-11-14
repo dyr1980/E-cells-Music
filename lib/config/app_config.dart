@@ -2,11 +2,11 @@ class AppConfig {
   const AppConfig._();
 
   static const appName = '小橙子音乐';
-  static const appVersion = '2.0.3';
+  static const appVersion = '2.0.4';
 
   /// 版本码口径：major*1000000 + minor*1000 + patch（见 models/app_version.dart
-  /// 的 semverToCode 与 docs/release-process.md）。2.0.4 → 2000004。
-  static const appVersionCode = '2000003';
+  /// 的 semverToCode 与 docs/release-process.md）。2.1.3 → 2001003。
+  static const appVersionCode = '2001003';
 
   /// 酷狗系接口/CDN 的 Android 客户端 UA（与 rust/src/kugou/config.rs 一致）。
   /// 播放走本机代理注入（music_audio_handler），歌曲下载由 dio 请求头携带；
@@ -98,9 +98,9 @@ class AppConfig {
   static const maxConcurrentDownloads = 3;
 
   // ===== 检查更新（GitHub Releases，无后端） =====
-  /// 托管 Release / APK 的 GitHub 仓库。
+  /// 托管 Release / APK 的 GitHub 仓库（小橙子音乐 1.x 起沿用的发布仓库）。
   /// CI 打 tag 时会在此发布带 APK 附件的 Release。
-  static const githubRepoOwner = 'dyr1980';
+  static const githubRepoOwner = 'e-cells';
   static const githubRepoName = 'E-cells-Music';
 
   /// GitHub Releases 最新正式版接口（公开仓库无需鉴权，但必须带 User-Agent）。
